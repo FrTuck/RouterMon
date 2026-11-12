@@ -1,0 +1,600 @@
+#!/bin/sh
+# RouterMon — веб-API на роутере (uhttpd CGI). Отвечает JSON. Данные берёт из /tmp/rmon (их пишет lib/collect.sh).
+#   ?a=ping                 — «rmon-ok» (по нему соседние роутеры находят друг друга)
+#   ?a=peers                — роутеры с RouterMon в локальной сети
+#   ?a=sum                  — сводка для главной страницы: текущие значения, график за час, топ процессов
+#   ?a=host&r=1h|24h        — всё по роутеру: графики CPU/памяти/сети/температуры и таблица процессов за час
+#   ?a=traffic&m=&w=1       — трафик за период: w=1 — только канал по маршруту по умолчанию (сводка по всем роутерам),
+#                             без w — все интерфейсы, объём, сведения о них (мост, Wi-Fi, клиенты), conntrack
+#   ?a=clients              — клиенты этого роутера (MAC): Wi-Fi-станции и проводные устройства на его портах
+#   ?a=top&m=               — топ удалённых адресов (доменов) за период: отправлено, получено, устройства
+#   ?a=proc&pid=&st=        — процесс: подробности, потоки (замер за 1 с), история CPU и памяти за час
+#   ?a=relay&ip=&q=         — тот же запрос к соседнему роутеру через этот (если браузер не пускает напрямую)
+#   ?a=scan                 — роутеры OpenWrt в сети без RouterMon (для установщика и меню «Добавить роутер»)
+#   ?a=check&ip=          — можно ли добавить роутер: отвечает ли, есть ли SSH, стоит ли уже RouterMon
+#   POST ?a=add  {ip,password,persist}  — поставить RouterMon на роутер по SSH и добавить его в список
+#   POST ?a=forget {ip,name} — убрать роутер с главной (в hidden.conf; на нём самом ничего не меняется)
+#   POST ?a=unhide {ip}     — вернуть убранный роутер на главную
+# «Локальная сеть» — подсеть интерфейса lan этого роутера (например 192.168.1.0/24): ничего не зашито.
+# Отвечает только адресам из неё. Браузер опрашивает API всех роутеров напрямую (CORS для http://<IP из сети>:8089).
+export HOME=/root PATH=/usr/sbin:/usr/bin:/sbin:/bin
+WEB=/etc/rmon-web; D=/tmp/rmon; P=$D/p; PORT=8089
+KEY=/etc/dropbear/id_rmon
+C=/tmp/rmon-web; mkdir -p "$C"
+
+# подсеть lan (кэш на 5 минут)
+if [ -s "$C/lan" ] && [ $(( $(date +%s) - $(date -r "$C/lan" +%s) )) -lt 300 ]; then LANCIDR=$(cat "$C/lan")
+else
+  LANCIDR=$( . /lib/functions/network.sh 2>/dev/null; network_get_subnet s lan 2>/dev/null; echo "$s" )
+  case "$LANCIDR" in */*) ;; *) LANCIDR=$(ip -4 -o addr show | awk '$4 ~ /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/ { print $4; exit }') ;; esac
+  printf '%s\n' "$LANCIDR" >"$C/lan"
+fi
+LANIP=${LANCIDR%/*}
+# inlan <IP> — адрес из подсети lan?
+inlan() {
+  case "$1" in *[!0-9.]*|'') return 1 ;; esac
+  awk -v a="$1" -v c="$LANCIDR" 'function n(s,  p, i) { if (split(s, p, ".") != 4) return -1; for (i = 1; i <= 4; i++) if (p[i] == "" || p[i] + 0 > 255) return -1; return ((p[1] * 256 + p[2]) * 256 + p[3]) * 256 + p[4] }
+    BEGIN { split(c, x, "/"); if (x[2] == "") exit 1; m = 2 ^ (32 - x[2]); v = n(a); exit !(v >= 0 && int(v / m) == int(n(x[1]) / m)) }'
+}
+
+RA=${REMOTE_ADDR#::ffff:}
+case "$RA" in
+  127.0.0.1|::1) ;;
+  *) inlan "$RA" || { printf 'Status: 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nonly %s\n' "$LANCIDR"; exit 0; } ;;
+esac
+
+hdr() {
+  printf 'Content-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\n'
+  o=${HTTP_ORIGIN#http://}
+  if [ -n "$HTTP_ORIGIN" ] && [ "$o" != "$HTTP_ORIGIN" ] && [ "${o##*:}" = "$PORT" ] && inlan "${o%:*}"; then
+    printf 'Access-Control-Allow-Origin: %s\r\nVary: Origin\r\n' "$HTTP_ORIGIN"
+  fi
+  printf '\r\n'
+}
+js() { printf '"'; printf %s "$1" | tr -d '\001-\010\013-\037' | awk 'BEGIN{ORS=""} {gsub(/\\/,"\\\\\\\\"); gsub(/"/,"\\\\\""); gsub(/\t/," "); if (NR>1) print "\\n"; print}'; printf '"'; }
+fail() { hdr; printf '{"ok":false,"error":%s}\n' "$(js "$1")"; exit 0; }
+qp() { v=$(printf '%s\n' "$QUERY_STRING" | tr '&' '\n' | sed -n "s/^$1=//p" | head -n1); [ -n "$v" ] && uhttpd -d "$v"; }
+
+q() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")"; }
+body() { [ -n "$BODY" ] || BODY=$(head -c "${CONTENT_LENGTH:-0}"); }
+jf() { jsonfilter -s "$BODY" -e "$1" 2>/dev/null; }
+# POST — только со страницы RouterMon: тело application/json чужой сайт без разрешения CORS отправить не может,
+# а Origin, если браузер его прислал, должен быть страницей RouterMon из локальной сети
+post_only() {
+  [ "$REQUEST_METHOD" = POST ] || fail "нужен POST"
+  case "$CONTENT_TYPE" in application/json*) ;; *) fail "нужен POST со страницы RouterMon" ;; esac
+  if [ -n "$HTTP_ORIGIN" ]; then o=${HTTP_ORIGIN#http://}; [ "${o##*:}" = "$PORT" ] && inlan "${o%:*}" || fail "запрос не со страницы RouterMon"; fi
+}
+# tmo <сек> <команда...> — выполнить с ограничением по времени
+tmo() {
+  _tt=$1; shift
+  exec 3<&0
+  "$@" <&3 & _tp=$!
+  ( sleep "$_tt"; kill $_tp ) >/dev/null 2>&1 & _tw=$!
+  wait $_tp; _trc=$?
+  kill $_tw 2>/dev/null; exec 3<&-
+  return $_trc
+}
+# probe <IP> <порт> [запрос] — первые байты ответа (за 2 с)
+probe() {
+  ( { [ -n "$3" ] && printf '%b' "$3"; sleep 1; } | nc "$1" "$2" 2>/dev/null & _p=$!; sleep 2; kill $_p 2>/dev/null ) 2>/dev/null | head -c 300
+}
+listed() { [ -f "$WEB/routers.conf" ] && grep -q "^$1\$" "$WEB/routers.conf"; }
+# hidden.conf — роутеры, убранные с главной кнопкой-корзиной: «IP<TAB>имя». Их не показываем, даже если отвечают;
+# вернуть — из списка «Добавить роутер» (unhide) или добавив тот же IP заново (add)
+HID=$WEB/hidden.conf
+hidden() { [ -f "$HID" ] && grep -q "^$1	" "$HID"; }
+unhide() { [ -f "$HID" ] && { grep -v "^$1	" "$HID" >"$C/hd.tmp"; cat "$C/hd.tmp" >"$HID"; rm -f "$C/hd.tmp"; }; }
+NCPU=$(grep -c '^processor' /proc/cpuinfo); [ "$NCPU" -gt 0 ] || NCPU=1
+
+# --- общие awk-функции -----------------------------------------------------------
+# (в busybox awk обратную косую в замене gsub надо удваивать ещё раз: "\\\\\\\\" даёт \\, "\\\\\"" даёт \")
+AJ='function j(s) { gsub(/\\/, "\\\\\\\\", s); gsub(/"/, "\\\\\"", s); gsub(/\t/, " ", s); return "\"" s "\"" }
+function r1(x) { return sprintf("%.1f", x) }'
+
+# series <файл sys> <группа> — графики системы. Строка sys.tsv (поля):
+#  1 ts 2 uptime 3 user 4 nice 5 system 6 idle 7 iowait 8 irq 9 softirq 10 MemTotal 11 MemAvailable 12 MemFree
+#  13 Buffers 14 Cached 15 SReclaimable 16 SUnreclaim 17 AnonPages 18 Shmem 19 SwapTotal 20 SwapFree
+#  21-23 load 24 процессов 25 t CPU 26 t Wi-Fi 27 ядер 28 pswpin 29 pswpout
+series() {
+  awk -F'\t' -v g="$2" "$AJ"'
+  NF >= 29 { n++; for (k = 1; k <= 29; k++) v[n, k] = $k }
+  END {
+    m = 0
+    for (i = 2; i <= n; i++) {
+      a = 0; b = 0; for (k = 3; k <= 9; k++) { a += v[i, k]; b += v[i - 1, k] }
+      dt = a - b; ds = v[i, 1] - v[i - 1, 1]
+      if (dt <= 0 || ds <= 0 || ds > 600) continue
+      m++; T[m] = v[i, 1]
+      X[m, 1] = (v[i, 3] + v[i, 4] - v[i - 1, 3] - v[i - 1, 4]) / dt * 100
+      X[m, 2] = (v[i, 5] - v[i - 1, 5]) / dt * 100
+      X[m, 3] = (v[i, 8] + v[i, 9] - v[i - 1, 8] - v[i - 1, 9]) / dt * 100
+      X[m, 4] = (v[i, 7] - v[i - 1, 7]) / dt * 100
+      tot = v[i, 10]; fr = v[i, 12]; bu = v[i, 13]; ca = v[i, 14]; sr = v[i, 15]; an = v[i, 17]; sh = v[i, 18]
+      ke = tot - fr - bu - ca - sr - an; if (ke < 0) ke = 0
+      X[m, 5] = an / 1024; X[m, 6] = ke / 1024; X[m, 7] = (ca + bu - sh + sr) / 1024; X[m, 8] = sh / 1024; X[m, 9] = fr / 1024
+      X[m, 10] = v[i, 11] / 1024
+      X[m, 11] = (v[i, 19] - v[i, 20]) / 1024
+      X[m, 12] = v[i, 21]
+      X[m, 13] = v[i, 25] / 1000; X[m, 14] = v[i, 26] / 1000
+      sw = (v[i, 28] + v[i, 29] - v[i - 1, 28] - v[i - 1, 29]) * 4 / 1024 / ds; X[m, 15] = (sw < 0 ? 0 : sw)
+    }
+    if (g < 1) g = 1
+    np = 0
+    for (s = 1; s <= m; s += g) {
+      np++; e = s + g - 1; if (e > m) e = m
+      Y[np, 0] = T[e]
+      for (k = 1; k <= 15; k++) { z = 0; for (i = s; i <= e; i++) z += X[i, k]; Y[np, k] = z / (e - s + 1) }
+    }
+    split("t user sys irq io anon kern cache shm free avail swap load temp wtemp swapio", nm, " ")
+    printf "{"
+    for (k = 0; k <= 15; k++) {
+      printf "%s\"%s\":[", (k ? "," : ""), nm[k + 1]
+      for (i = 1; i <= np; i++) printf "%s%s", (i > 1 ? "," : ""), (k ? r1(Y[i, k]) : Y[i, k])
+      printf "]"
+    }
+    printf "}"
+  }' "$1"
+}
+
+# netseries <файл net> <группа> — скорость по интерфейсам, Мбит/с, и объём за окно, байт:
+#   {"eth1":{"t":[],"rx":[],"tx":[],"brx":принято,"btx":отдано},...}
+netseries() {
+  awk -F'\t' -v g="$2" "$AJ"'
+  { if ($2 in lt) { ds = $1 - lt[$2]; drx = $3 - lrx[$2]; dtx = $4 - ltx[$2]
+      if (ds > 0 && ds <= 600 && drx >= 0 && dtx >= 0) { c = ++cnt[$2]; T[$2, c] = $1; RX[$2, c] = drx * 8 / ds / 1e6; TX[$2, c] = dtx * 8 / ds / 1e6; BR[$2] += drx; BT[$2] += dtx } }
+    else ord[++ni] = $2
+    lt[$2] = $1; lrx[$2] = $3; ltx[$2] = $4 }
+  END {
+    if (g < 1) g = 1
+    printf "{"; o = 0
+    for (q = 1; q <= ni; q++) { f = ord[q]; m = cnt[f]; if (!m) continue
+      printf "%s%s:{", (o++ ? "," : ""), j(f); ts = ""; rs = ""; xs = ""
+      for (s = 1; s <= m; s += g) { e = s + g - 1; if (e > m) e = m; a = 0; b = 0
+        for (i = s; i <= e; i++) { a += RX[f, i]; b += TX[f, i] }
+        ts = ts (ts == "" ? "" : ",") T[f, e]; rs = rs (rs == "" ? "" : ",") sprintf("%.3f", a / (e - s + 1)); xs = xs (xs == "" ? "" : ",") sprintf("%.3f", b / (e - s + 1)) }
+      printf "\"t\":[%s],\"rx\":[%s],\"tx\":[%s],\"brx\":%.0f,\"btx\":%.0f}", ts, rs, xs, BR[f], BT[f] }
+    printf "}"
+  }' "$1"
+}
+
+# procs <лимит> <файлы снимков...> — таблица процессов за окно снимков.
+# Ключ процесса — pid+starttime (pid может достаться новому процессу).
+# cpu — % всей мощности роутера за последние 10 с; avg — среднее за время жизни в окне; peak — максимум за 10 с.
+procs() {
+  lim=$1; shift
+  [ $# -gt 0 ] && [ -f "$1" ] || { printf '[]'; return; }
+  [ -f "$D/cmd.tsv" ] || : >"$D/cmd.tsv"
+  # на одну строку снимка — минимум операций: busybox awk на ARM медленный, а строк за час ~60 тысяч
+  # Читаются только 3 снимка (самый старый в окне, предпоследний, последний) и pk.tsv —
+  # пики CPU/памяти по 10-минутным корзинам, которые копит сборщик. Перечитывать все 360 снимков
+  # (~60 тысяч строк) busybox awk на ARM слишком долго — до 5–25 с.
+  [ -f "$D/pk.tsv" ] || : >"$D/pk.tsv"
+  O1=$1; eval "L1=\${$#}"; P1=$O1; [ $# -ge 2 ] && eval "P1=\${$(($# - 1))}"
+  awk -F'\t' -v nc="$NCPU" -v lim="$lim" -v CF="$D/cmd.tsv" -v KF="$D/pk.tsv" "$AJ"'
+  FILENAME == CF { cmd[$1] = $2; next }
+  FILENAME == KF { k = $1; if ($3 > pk[k]) pk[k] = $3; if ($4 > rmx[k]) rmx[k] = $4; if ($6 > gU[k]) { gU[k] = $6; gT[k] = $5; gN[k] = $7 }; next }
+  FNR == 1 { si++; SU[si] = $2; next }
+  si == 1 { k = $1 "/" $7; oT[k] = $3; oR[k] = $4; next }
+  si == 2 { qT[$1 "/" $7] = $3; next }
+  { k = $1 "/" $7; lT[k] = $3; lR[k] = $4; pp[k] = $2; th[k] = $5; st[k] = $6; nm[k] = $8; pid[k] = $1; sT[k] = $7 }
+  END {
+    oU = SU[1]; qU = SU[2]; U = SU[3]; n = 0
+    for (k in pk) pk[k] = pk[k] * 100 / nc
+    for (k in lT) {   # живые
+      now = ((k in qT) && U > qU) ? (lT[k] - qT[k]) / (U - qU) * 100 / nc : 0
+      if (k in oT) { b = oU; avg = (U > oU) ? (lT[k] - oT[k]) / (U - oU) * 100 / nc : now; r0[k] = oR[k] }
+      else { b = sT[k]; avg = (U > b) ? lT[k] / (U - b) * 100 / nc : now; r0[k] = lR[k] }   # родился внутри окна
+      if (!(k in rmx) || rmx[k] < lR[k]) rmx[k] = lR[k]
+      LF[k] = (U - b) / 100
+      n++; K[n] = k; S[n] = now * 1000 + lR[k] / 1e6; G[k] = 0; NW[k] = now; AV[k] = avg
+    }
+    for (k in gU) {   # завершившиеся за час — только с заметной нагрузкой (cat, sleep и прочий шум отсеивается)
+      if (k in lT || pk[k] < 0.1) continue
+      split(k, a, "/"); pid[k] = a[1]; sT[k] = a[2]; nm[k] = gN[k]; pp[k] = 0; th[k] = 0; st[k] = "X"
+      b = (k in oT) ? oU : a[2]; t0 = (k in oT) ? oT[k] : 0
+      AV[k] = (gU[k] > b) ? (gT[k] - t0) / (gU[k] - b) * 100 / nc : 0; NW[k] = 0
+      lR[k] = rmx[k]; r0[k] = (k in oR) ? oR[k] : rmx[k]; LF[k] = (gU[k] - b) / 100
+      n++; K[n] = k; S[n] = -1; G[k] = 1
+    }
+    # сортировка вставкой по cpu, при лимите — топ по cpu и по памяти
+    for (i = 2; i <= n; i++) { x = K[i]; y = S[i]; for (q = i - 1; q >= 1 && S[q] < y; q--) { K[q + 1] = K[q]; S[q + 1] = S[q] }; K[q + 1] = x; S[q + 1] = y }
+    if (lim > 0) {
+      for (i = 1; i <= n && i <= lim; i++) keep[K[i]] = 1
+      for (i = 1; i <= n; i++) { R[i] = (G[K[i]] ? -1 : lR[K[i]]); RK[i] = K[i] }
+      for (i = 2; i <= n; i++) { x = RK[i]; y = R[i]; for (q = i - 1; q >= 1 && R[q] < y; q--) { RK[q + 1] = RK[q]; R[q + 1] = R[q] }; RK[q + 1] = x; R[q + 1] = y }
+      for (i = 1; i <= n && i <= lim; i++) keep[RK[i]] = 1
+    }
+    printf "["; o = 0
+    for (i = 1; i <= n; i++) { k = K[i]; if (lim > 0 && !(k in keep)) continue
+      kt = (pp[k] == 2 || pid[k] == 2)
+      printf "%s{\"pid\":%d,\"st\":%s,\"ppid\":%d,\"name\":%s,\"cmd\":%s,\"state\":%s,\"thr\":%d,\"rss\":%d,\"rss0\":%d,\"rssMax\":%d,\"cpu\":%s,\"avg\":%s,\"peak\":%s,\"gone\":%s,\"k\":%s,\"life\":%d}",
+        (o++ ? "," : ""), pid[k], sT[k], pp[k], j(nm[k]), j(G[k] ? "" : cmd[pid[k]]), j(st[k]), th[k], lR[k], r0[k], rmx[k],
+        r1(NW[k]), r1(AV[k]), r1(pk[k] > NW[k] ? pk[k] : NW[k]), (G[k] ? "true" : "false"), (kt ? "true" : "false"), LF[k] }
+    printf "]"
+  }' "$D/cmd.tsv" "$D/pk.tsv" "$O1" "$P1" "$L1"
+}
+
+info() {
+  nm=$(cat /proc/sys/kernel/hostname); md=$(cat /tmp/sysinfo/model 2>/dev/null)
+  fw=$(. /etc/openwrt_release 2>/dev/null; echo "$DISTRIB_DESCRIPTION")
+  read up _ </proc/uptime
+  age=-1; [ -s "$D/sys.now" ] && age=$(( $(date +%s) - $(cut -f1 "$D/sys.now") ))
+  wan=$(ip route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
+  swt=$(awk '/^SwapTotal:/ { print $2 }' /proc/meminfo)
+  printf '"ip":"%s","name":%s,"model":%s,"fw":%s,"ncpu":%d,"uptime":%d,"now":%d,"age":%d,"wan":%s,"interval":10,"swapTotal":%d' \
+    "$LANIP" "$(js "$nm")" "$(js "$md")" "$(js "$fw")" "$NCPU" "${up%.*}" "$(date +%s)" "$age" "$(js "$wan")" "${swt:-0}"
+  printf ',"disks":['
+  df -k 2>/dev/null | awk "$AJ"'NR > 1 && ($6 == "/" || $6 ~ /^\/mnt\//) && $2 > 0 { printf "%s{\"mp\":%s,\"total\":%.0f,\"used\":%.0f}", (k++ ? "," : ""), j($6), $2, $3 }'
+  printf ']'
+  # температура каждого радиомодуля Wi-Fi (пишет сборщик)
+  printf ',"wmods":['
+  [ -s "$D/wt.now" ] && awk -F'\t' "$AJ"'$2 > 0 { printf "%s{\"n\":%s,\"t\":%.1f}", (k++ ? "," : ""), j($1), $2 / 1000 }' "$D/wt.now"
+  printf ']'
+  printf ',"cur":'
+  if [ -s "$D/sys.tsv" ]; then tail -n 2 "$D/sys.tsv" | series /dev/stdin 1; else printf 'null'; fi
+}
+
+lastfiles() { ls "$P" 2>/dev/null | grep -v tmp | tail -n "$1" | sed "s#^#$P/#"; }
+
+A=$(qp a)
+case "$A" in
+
+ping) printf 'Content-Type: text/plain\r\n\r\nrmon-ok\n' ;;
+
+relay)
+  # запасной путь, если браузер не может обратиться к соседнему роутеру напрямую (блокировщик, другой адрес страницы)
+  ip=$(qp ip); inlan "$ip" || fail "неверный IP"
+  q=$(qp q); case "$q" in *[!A-Za-z0-9=\&_.-]*|'') fail "неверный запрос" ;; esac
+  case "$q" in a=sum|a=host|a=host\&*|a=traffic|a=traffic\&*|a=top\&*|a=clients|a=proc\&*) ;; *) fail "неверный запрос" ;; esac   # только чтение
+  O=$(uclient-fetch -q -T 20 -O - "http://$ip:$PORT/cgi-bin/api?$q" 2>/dev/null) || fail "нет связи с $ip"
+  hdr; printf '%s\n' "$O"
+  ;;
+
+peers)
+  # кэш на минуту: поиск занимает пару секунд
+  if [ -s "$C/peers" ] && [ $(( $(date +%s) - $(date -r "$C/peers" +%s) )) -lt 60 ]; then hdr; cat "$C/peers"; exit 0; fi
+  S="$C/scan.$$"; rm -rf "$S"; mkdir -p "$S"
+  cands=$( { echo "$LANIP"
+             awk 'NR > 1 && $3 != "0x0" { print $1 }' /proc/net/arp
+             [ -f "$WEB/routers.conf" ] && grep -o '^[0-9.]*' "$WEB/routers.conf"; } | grep '^[0-9.]*$' | sort -u )
+  cands=$(for ip in $cands; do inlan "$ip" && echo "$ip"; done)
+  for ip in $cands; do
+    if [ "$ip" = "$LANIP" ]; then echo rmon-ok >"$S/$ip"; continue; fi
+    # busybox nc закрывает соединение, как только кончился stdin, — поэтому stdin держим открытым ещё секунду
+    ( { printf 'GET /cgi-bin/api?a=ping HTTP/1.0\r\n\r\n'; sleep 1; } | nc "$ip" $PORT >"$S/$ip" 2>/dev/null & p=$!; sleep 2; kill $p 2>/dev/null ) >/dev/null 2>&1 &
+  done
+  wait
+  # в списке: все, кто ответил, и все добавленные вручную (даже если сейчас не отвечают — чтобы было видно и можно было убрать)
+  out='{"ok":true,"self":"'"$LANIP"'","lan":"'"$LANCIDR"'","peers":['; n=0; man=; mn=0
+  for ip in $(printf '%s\n' $cands | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n); do
+    [ "$ip" != "$LANIP" ] && hidden "$ip" && continue
+    listed "$ip" && { [ $mn -gt 0 ] && man="$man,"; mn=$((mn + 1)); man="$man\"$ip\""; }
+    grep -q rmon-ok "$S/$ip" 2>/dev/null || listed "$ip" || continue
+    [ $n -gt 0 ] && out="$out,"; n=$((n + 1)); out="$out\"$ip\""
+  done
+  hd=$( [ -f "$HID" ] && awk -F'\t' "$AJ"'$1 ~ /^[0-9.]+$/ { printf "%s{\"ip\":%s,\"name\":%s}", (k++ ? "," : ""), j($1), j($2) }' "$HID" )
+  out="$out],\"manual\":[$man],\"hidden\":[$hd]}"; rm -rf "$S"
+  printf '%s\n' "$out" >"$C/peers"; hdr; printf '%s\n' "$out"
+  ;;
+
+scan)
+  # роутеры OpenWrt в локальной сети, на которых RouterMon ещё нет: соседи из ARP, у которых на порту 22
+  # отвечает dropbear (SSH-сервер OpenWrt), а на порту RouterMon — никто. Кэш 2 мин: опрос занимает пару секунд
+  if [ -s "$C/scan" ] && [ $(( $(date +%s) - $(date -r "$C/scan" +%s) )) -lt 120 ]; then hdr; cat "$C/scan"; exit 0; fi
+  S="$C/sc.$$"; rm -rf "$S"; mkdir -p "$S"
+  for ip in $(awk 'NR > 1 && $3 != "0x0" { print $1 }' /proc/net/arp | sort -u | head -n 64); do
+    [ "$ip" = "$LANIP" ] && continue; inlan "$ip" || continue
+    ( probe "$ip" 22 | head -n1 | tr -d '\r\001-\037' >"$S/$ip.ssh"
+      probe "$ip" $PORT 'GET /cgi-bin/api?a=ping HTTP/1.0\r\n\r\n' | grep -q rmon-ok && : >"$S/$ip.rmon" ) >/dev/null 2>&1 &
+  done
+  wait
+  out='{"ok":true,"found":['; n=0
+  for f in "$S"/*.ssh; do
+    [ -f "$f" ] || continue; ip=${f##*/}; ip=${ip%.ssh}
+    b=$(cat "$f"); case "$b" in SSH-*[Dd]ropbear*) ;; *) continue ;; esac
+    [ -f "$S/$ip.rmon" ] && continue; hidden "$ip" && continue
+    [ $n -gt 0 ] && out="$out,"; n=$((n + 1)); out="$out{\"ip\":\"$ip\",\"banner\":$(js "$b")}"
+  done
+  out="$out]}"; rm -rf "$S"
+  printf '%s\n' "$out" >"$C/scan"; hdr; printf '%s\n' "$out"
+  ;;
+
+check)
+  ip=$(qp ip); inlan "$ip" || fail "адрес $ip не из локальной сети $LANCIDR"
+  [ "$ip" = "$LANIP" ] && fail "это сам роутер, с которого открыта страница: он уже в списке"
+  ping -c 1 -W 2 "$ip" >/dev/null 2>&1 && pg=true || pg=false
+  sb=$(probe "$ip" 22 | head -n1 | tr -d '\r\001-\037')
+  case "$sb" in SSH-*) sh=true ;; *) sh=false; sb= ;; esac
+  probe "$ip" $PORT 'GET /cgi-bin/api?a=ping HTTP/1.0\r\n\r\n' | grep -q rmon-ok && rm=true || rm=false
+  ky=false
+  if [ $sh = true ] && [ $rm = false ] && [ -f "$KEY" ]; then
+    tmo 10 dbclient -y -i "$KEY" "root@$ip" 'echo KEY-OK' </dev/null 2>/dev/null | grep -q KEY-OK && ky=true
+  fi
+  listed "$ip" && li=true || li=false
+  hdr; printf '{"ok":true,"ip":"%s","ping":%s,"ssh":%s,"banner":%s,"rmon":%s,"key":%s,"listed":%s,"host":%s,"hostip":"%s","lan":"%s"}\n' \
+    "$ip" $pg $sh "$(js "$sb")" $rm $ky $li "$(js "$(cat /proc/sys/kernel/hostname)")" "$LANIP" "$LANCIDR"
+  ;;
+
+add)
+  post_only; body
+  ip=$(jf '@.ip'); inlan "$ip" || fail "адрес $ip не из локальной сети $LANCIDR"
+  [ "$ip" = "$LANIP" ] && fail "это сам роутер, с которого открыта страница"
+  res=listed; O=
+  if ! probe "$ip" $PORT 'GET /cgi-bin/api?a=ping HTTP/1.0\r\n\r\n' | grep -q rmon-ok; then
+    res=installed; pub=-
+    if [ "$(jf '@.persist')" = true ]; then
+      [ -f "$KEY" ] || dropbearkey -t ed25519 -f "$KEY" >/dev/null 2>&1 || fail "не удалось создать ключ $KEY"
+      pub=$(dropbearkey -y -f "$KEY" 2>/dev/null | grep '^ssh-')
+      [ -n "$pub" ] || fail "не удалось прочитать ключ $KEY"
+    fi
+    ida=; [ -f "$KEY" ] && ida="-i $KEY"
+    pw=$(jf '@.password')
+    # пароль только в переменной окружения dbclient на время этого запроса; нигде не сохраняется
+    [ -n "$pw" ] && export DROPBEAR_PASSWORD="$pw"
+    cmd="rm -rf /tmp/rmon-inst && mkdir -p /tmp/rmon-inst && tar -xf - -C /tmp/rmon-inst && sh /tmp/rmon-inst/lib/setup.sh install $PORT $(q "$pub") $(q "$LANIP")"
+    O=$(tar -cf - -C "$WEB" . | tmo 80 dbclient -y $ida "root@$ip" "$cmd" 2>&1)
+    unset DROPBEAR_PASSWORD pw
+    case "$O" in
+      *INSTALLED*) ;;
+      *) e=$(printf '%s\n' "$O" | grep '^ERR ' | tail -n1); e=${e#ERR }
+         if [ -z "$e" ]; then case "$O" in
+           *[Hh]ost*key*|*[Mm]ismatch*) e="ключ SSH-сервера $ip не совпадает с запомненным (роутер переустановлен или подменён). Если это ожидаемо, удалите строку с $ip из /root/.ssh/known_hosts на $LANIP" ;;
+           *efused*|*imed\ out*|*o\ route*|'') e="не удалось подключиться к $ip по SSH" ;;
+           *ermission*|*assword*|*uth*|*emote\ closed*) e="не удалось войти на $ip: неверный пароль root или вход по паролю на нём запрещён" ;;
+           *) e="установка не удалась: $(printf '%s\n' "$O" | tail -n 3)" ;;
+         esac; fi
+         fail "$e" ;;
+    esac
+  fi
+  touch "$WEB/routers.conf"; listed "$ip" || echo "$ip" >>"$WEB/routers.conf"
+  unhide "$ip"; rm -f "$C/peers"
+  hdr; printf '{"ok":true,"result":"%s","log":%s}\n' "$res" "$(js "$(printf '%s\n' "$O" | grep -v '^$' | tail -n 20)")"
+  ;;
+
+forget)
+  post_only; body
+  # убрать с главной: роутер запоминается в hidden.conf и больше не показывается, даже если отвечает.
+  # На нём самом ничего не меняется; routers.conf не трогаем, чтобы при возврате он снова был виден и без ARP
+  ip=$(jf '@.ip'); case "$ip" in ''|*[!0-9.]*) fail "неверный IP" ;; esac
+  [ "$ip" = "$LANIP" ] && fail "нельзя убрать роутер, с которого открыта страница"
+  nm=$(jf '@.name' | tr -d '\000-\037' | cut -c1-40); [ -n "$nm" ] || nm=$ip
+  unhide "$ip"; printf '%s\t%s\n' "$ip" "$nm" >>"$HID"
+  rm -f "$C/peers"
+  hdr; printf '{"ok":true}\n'
+  ;;
+
+unhide)
+  # вернуть убранный роутер на главную
+  post_only; body
+  ip=$(jf '@.ip'); case "$ip" in ''|*[!0-9.]*) fail "неверный IP" ;; esac
+  unhide "$ip"
+  [ "$ip" != "$LANIP" ] && { touch "$WEB/routers.conf"; listed "$ip" || echo "$ip" >>"$WEB/routers.conf"; }
+  rm -f "$C/peers"
+  hdr; printf '{"ok":true}\n'
+  ;;
+
+sum)
+  hdr; printf '{"ok":true,'; info
+  printf ',"hist":'; series "$D/sys.tsv" 6
+  printf ',"net":'; [ -s "$D/net.tsv" ] && tail -n 200 "$D/net.tsv" | netseries /dev/stdin 1 || printf '{}'
+  printf ',"top":'; procs 8 $(lastfiles 360)
+  printf '}\n'
+  ;;
+
+host|traffic)
+  # m — период в минутах, 15…1440 (r — старый параметр в часах, тоже понимается)
+  # m=all — вся имеющаяся история (минутная, с запуска сборщика, но не больше суток — столько хранится в ОЗУ)
+  m=$(qp m); all=0
+  if [ "$m" = all ]; then all=1; m=$(grep -c . "$D/sys1m.tsv" 2>/dev/null); [ "${m:-0}" -gt 0 ] || m=60
+  else case "$m" in ''|*[!0-9]*) r=$(qp r); r=${r%h}; case "$r" in ''|*[!0-9]*) r=1 ;; esac; m=$((r * 60)) ;; esac; fi
+  [ "$m" -lt 15 ] && m=15; [ "$m" -gt 1440 ] && m=1440
+  now=$(date +%s)
+  # до часа — подробная история по 10 с; больше — по 1 мин, на графике не больше ~360 точек
+  if [ "$m" -le 60 ] && [ $all = 0 ]; then NF_=$D/net.tsv; g=1; ofs=10; else NF_=$D/net1m.tsv; g=$(( (m + 359) / 360 )); ofs=60; fi
+  # netwin [интерфейс] — сеть за период (только этот интерфейс, если задан)
+  netwin() { if [ -s "$NF_" ]; then awk -F'\t' -v t=$((now - m * 60 - ofs)) -v i="$1" '$1 >= t && (i == "" || $2 == i)' "$NF_" | netseries /dev/stdin $g; else printf '{}'; fi; }
+case "$A" in traffic)
+  # трафик: w=1 — только канал по маршруту по умолчанию (для сводки по всем роутерам), иначе все интерфейсы и сведения о них
+  wan=$(ip route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
+  hdr; printf '{"ok":true,"ip":"%s","name":%s,"wan":%s,"now":%d,"range":%d' "$LANIP" "$(js "$(cat /proc/sys/kernel/hostname)")" "$(js "$wan")" "$now" "$m"
+  [ $all = 1 ] && printf ',"all":true'
+  if [ "$(qp w)" = 1 ]; then
+    printf ',"net":'; if [ -n "$wan" ]; then netwin "$wan"; else printf '{}'; fi
+  else
+    printf ',"net":'; netwin
+    # сведения об интерфейсах: мост, в который входит, состояние, скорость порта; Wi-Fi — SSID, частота, клиенты
+    W=$(iw dev 2>/dev/null | awk '$1 == "Interface" { i = $2 } $1 == "ssid" { s = $0; sub(/^[ \t]*ssid /, "", s); S[i] = s } $1 == "type" { T[i] = $2 }
+      $1 == "channel" { C[i] = $2; f = $3; gsub(/[^0-9]/, "", f); F[i] = f }
+      END { for (i in T) printf "%s\t%s\t%s\t%s\t%s\n", i, T[i], C[i], F[i], S[i] }')
+    printf ',"ifi":{'; k=0
+    for p in /sys/class/net/*; do
+      n=${p##*/}; [ "$n" = lo ] && continue
+      ms=$(readlink "$p/master" 2>/dev/null); ms=${ms##*/}
+      st=; read st <"$p/operstate" 2>/dev/null
+      sp=; read sp <"$p/speed" 2>/dev/null; case "$sp" in ''|-*|*[!0-9]*) sp=0 ;; esac
+      [ $k -gt 0 ] && printf ','; k=1
+      printf '%s:{"m":%s,"st":%s,"sp":%d' "$(js "$n")" "$(js "$ms")" "$(js "$st")" "$sp"
+      wl=$(printf '%s\n' "$W" | awk -F'\t' -v n="$n" '$1 == n')
+      if [ -n "$wl" ]; then
+        sta=0; [ -n "$(printf '%s' "$wl" | cut -f2 | grep -i '^AP\|^mesh')" ] && sta=$(iw dev "$n" station dump 2>/dev/null | grep -c '^Station')
+        printf ',"w":{"type":%s,"ch":%s,"f":%s,"ssid":%s,"sta":%d}' "$(js "$(printf '%s' "$wl" | cut -f2)")" "$(js "$(printf '%s' "$wl" | cut -f3)")" \
+          "$(js "$(printf '%s' "$wl" | cut -f4)")" "$(js "$(printf '%s' "$wl" | cut -f5)")" "$sta"
+      fi
+      printf '}'
+    done
+    printf '}'
+    # логические сети OpenWrt: устройство → имя сети (lan, wan, iot, VPN-туннели — по имени секции)
+    printf ',"lg":{'
+    uci -q show network 2>/dev/null | awk -F'[.=]' "$AJ"'
+      { v = substr($0, index($0, "=") + 1); gsub(/\x27/, "", v) }
+      $3 == "device" && NF >= 4 { if (v != "" && (!(v in L) || L[v] ~ /6$/)) L[v] = $2 }   # wan важнее wan6
+      $3 == "proto" { P[$2] = v }
+      END { for (s in P) { if (P[s] ~ /wireguard|amneziawg|vxlan|openvpn/ && !(s in L)) L[s] = s
+              if (P[s] == "gretap") L["gre4t-" s] = s; if (P[s] == "gre") L["gre4-" s] = s }
+            for (d in L) printf "%s%s:%s", (k++ ? "," : ""), j(d), j(L[d]) }'
+    printf '}'
+    # cat, а не read: busybox read из /proc/sys возвращает пустую строку
+    ct=$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null); cm=$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null)
+    printf ',"ct":[%d,%d]' "${ct:-0}" "${cm:-0}"
+  fi
+  printf '}\n'; exit 0 ;;
+esac
+  hdr; printf '{"ok":true,'; info
+  [ $all = 1 ] && printf ',"all":true'
+  if [ $g = 1 ] && [ $ofs = 10 ]; then
+    printf ',"range":%d,"hist":' "$m"; tail -n $((m * 6 + 1)) "$D/sys.tsv" 2>/dev/null | series /dev/stdin 1
+  else
+    printf ',"range":%d,"hist":' "$m"; tail -n $((m + 1)) "$D/sys1m.tsv" 2>/dev/null | series /dev/stdin $g
+  fi
+  printf ',"net":'; netwin
+  # таблица процессов меняется только с новым снимком (раз в 10 с) — считаем один раз на снимок
+  # (переключение периода и несколько открытых вкладок не пересчитывают её заново)
+  lf=$(lastfiles 1); pc="$C/procs.${lf##*/}"
+  if [ ! -s "$pc" ]; then rm -f "$C"/procs.*; procs 0 $(lastfiles 360) >"$pc.tmp" && mv "$pc.tmp" "$pc"; fi
+  printf ',"procs":'; cat "$pc" 2>/dev/null || printf '[]'
+  # сколько памяти каждого процесса сейчас в swap (VmSwap), только ненулевые: {"pid":кБ}
+  printf ',"swap":{'
+  cat /proc/[0-9]*/status 2>/dev/null | awk '/^Pid:/ { p = $2 } /^VmSwap:/ && $2 > 0 { printf "%s\"%s\":%d", (n++ ? "," : ""), p, $2 }'
+  printf '}'
+  printf '}\n'
+  ;;
+
+clients)
+  # клиенты ЭТОГО роутера (MAC): Wi-Fi — станции на его точках доступа; провод — адреса, выученные мостом на его
+  # портах (lan*, eth*, wan*) за последние 5 мин. Mesh, GRE и прочие туннели — магистраль между роутерами, не клиенты.
+  # Порт, за которым виден другой роутер (проводная магистраль), отсеивает страница — ей известны MAC роутеров.
+  hdr; printf '{"ok":true,"ip":"%s","name":%s,"wifi":{' "$LANIP" "$(js "$(cat /proc/sys/kernel/hostname)")"
+  k=0; WL=; ST=; AP=
+  for i in $(iw dev 2>/dev/null | awk '$1 == "Interface" { print $2 }'); do
+    WL="$WL $i "; inf=$(iw dev "$i" info 2>/dev/null); printf '%s' "$inf" | grep -q 'type AP' || continue
+    AP="$AP$(printf '%s' "$inf" | awk -v i="$i" "$AJ"'$1 == "ssid" { s = $0; sub(/^[ \t]*ssid /, "", s) } $1 == "channel" { f = $3; gsub(/[^0-9]/, "", f) }
+      END { printf ",%s:{\"ssid\":%s,\"f\":%d}", j(i), j(s), f }')"
+    sd=$(iw dev "$i" station dump 2>/dev/null)
+    [ $k -gt 0 ] && printf ','; k=1
+    printf '%s:[%s]' "$(js "$i")" "$(printf '%s\n' "$sd" | awk '$1 == "Station" { printf "%s\"%s\"", (n++ ? "," : ""), toupper($2) }')"
+    # подробности станций: сигнал, скорости канала, время подключения и простоя
+    ST="$ST$(printf '%s\n' "$sd" | awk -v i="$i" '
+      function out() { if (m != "") printf ",{\"m\":\"%s\",\"if\":\"%s\",\"sig\":%d,\"tx\":%.1f,\"rx\":%.1f,\"ct\":%d,\"in\":%d}", m, i, sg, tx, rx, ct, it }
+      $1 == "Station" { out(); m = toupper($2); sg = 0; tx = 0; rx = 0; ct = 0; it = 0 }
+      /^[ \t]*signal:/ { sg = $2 } /^[ \t]*tx bitrate:/ { tx = $3 } /^[ \t]*rx bitrate:/ { rx = $3 }
+      /^[ \t]*connected time:/ { ct = $3 } /^[ \t]*inactive time:/ { it = $3 }
+      END { out() }')"
+  done
+  printf '},"aps":{%s},"sta":[%s]' "${AP#,}" "${ST#,}"
+  printf ',"wired":{'; k=0
+  for b in /sys/class/net/br-*; do
+    [ -d "$b/brif" ] || continue; br=${b##*/}
+    # номер порта моста → имя интерфейса (port_no в sysfs — шестнадцатеричный)
+    pm=$(for p in "$b"/brif/*; do [ -f "$p/port_no" ] && printf '%d %s\n' "$(cat "$p/port_no")" "${p##*/}"; done)
+    brctl showmacs "$br" 2>/dev/null | awk -v PM="$pm" -v WL="$WL" 'BEGIN { n = split(PM, a, "\n"); for (i = 1; i <= n; i++) { split(a[i], b, " "); P[b[1]] = b[2] } }
+      NR > 1 && $3 == "no" && $4 + 0 < 300 { p = P[$1]; if (p ~ /^(lan|eth|wan)/ && !index(WL, " " p " ")) print p, toupper($2) }'
+  done | sort -u | awk -v k0=0 '{ if ($1 != cur) { printf "%s\"%s\":[", (cur != "" ? "]," : ""), $1; cur = $1; n = 0 } printf "%s\"%s\"", (n++ ? "," : ""), $2 } END { if (cur != "") printf "]" }'
+  printf '}}\n'
+  ;;
+
+top)
+  # топ удалённых адресов за период (m — минуты, 15…1440 или all) по 5-минутным корзинам сборщика.
+  # Строка — домен (или IP, если домен неизвестен): объём отправленного и полученного, число IP,
+  # устройства {"IP устройства":[отправлено,получено]} («@» — сам роутер).
+  # Считается раз в минуту на период, ответ кэшируется.
+  m=$(qp m); [ "$m" = all ] && m=1440; case "$m" in ''|*[!0-9]*) m=60 ;; esac
+  [ "$m" -lt 15 ] && m=15; [ "$m" -gt 1440 ] && m=1440
+  now=$(date +%s); TR=$D/tr; tc="$C/top.$m.$((now / 60))"
+  if [ ! -s "$tc" ]; then
+    rm -f "$C"/top.$m.*
+    b0=$(( (now - m * 60) / 300 )); fs=
+    for f in "$TR"/*; do b=${f##*/}; case "$b" in ''|*[!0-9]*) continue ;; esac; [ "$b" -ge "$b0" ] && fs="$fs $f"; done
+    first=$(for f in $fs; do echo "${f##*/}"; done | sort -n | head -n 1)
+    {
+      printf '{"ok":true,"ip":"%s","name":%s,"now":%d,"range":%d,"since":%d,"dns":%s' "$LANIP" "$(js "$(cat /proc/sys/kernel/hostname)")" "$now" "$m" "$(( ${first:-0} * 300 ))" \
+        "$( [ "$(uci -q get dhcp.@dnsmasq[0].logfacility)" = /tmp/rmon-dns.log ] && echo true || echo false )"
+      # устройства: IP → {имя, MAC}. Имя — только из статических хостов /etc/config/dhcp (по IP, иначе по MAC);
+      # незнакомому устройству имя пустое. MAC — из ARP-таблицы и аренд DHCP.
+      printf ',"self":{"m":%s},"devs":{' "$(js "$(cat /sys/class/net/br-lan/address 2>/dev/null | tr a-f A-F)")"
+      lf=/tmp/dhcp.leases; [ -f "$lf" ] || lf=/dev/null
+      uci -q show dhcp 2>/dev/null | awk -v ARP=/proc/net/arp -v LS="$lf" "$AJ"'
+        FILENAME == ARP { if (FNR > 1 && $4 != "00:00:00:00:00:00") M[$1] = toupper($4); next }
+        FILENAME == LS { if (!($3 in M)) M[$3] = toupper($2); next }
+        { p = index($0, "="); l = substr($0, 1, p - 1); v = substr($0, p + 1); gsub(/\x27/, "", v); n = split(l, a, ".")
+          if (n == 2 && v == "host") H[a[2]] = 1
+          else if (n == 3) { if (a[3] == "name") HN[a[2]] = v; else if (a[3] == "ip") HI[a[2]] = v; else if (a[3] == "mac") HM[a[2]] = toupper(v) } }
+        END {
+          for (s in H) { if (HN[s] == "") continue; if (HI[s] != "") { byIp[HI[s]] = HN[s]; if (!(HI[s] in M) && HM[s] != "") M[HI[s]] = HM[s] }
+            k = split(HM[s], ms, " "); for (i = 1; i <= k; i++) byMac[ms[i]] = HN[s] }
+          for (ip in M) { nm = (ip in byIp) ? byIp[ip] : ((M[ip] in byMac) ? byMac[M[ip]] : "")
+            printf "%s%s:{\"n\":%s,\"m\":%s}", (o++ ? "," : ""), j(ip), j(nm), j(M[ip]) }
+        }' - /proc/net/arp "$lf"
+      printf '}'
+      printf ',"rows":['
+      if [ -n "$fs" ]; then
+        # 1) сумма по (метка, устройство); 2) по метке: всего, отправлено, получено, IP, устройства → топ-300
+        cat $fs | awk -F'\t' '{ l = ($3 != "") ? $3 : $2; k = l "\t" $1; U[k] += $4; G[k] += $5; if (!((l, $2) in seen)) { seen[l, $2] = 1; nip[l]++; ip[l] = $2 } }
+          END { for (k in U) { split(k, a, "\t"); l = a[1]; u[l] += U[k]; g[l] += G[k]; c[l] = c[l] (c[l] == "" ? "" : " ") a[2] "=" sprintf("%.0f,%.0f", U[k], G[k]) }
+                for (l in u) printf "%.0f\t%s\t%s\t%d\t%.0f\t%.0f\t%s\n", u[l] + g[l], l, ip[l], nip[l], u[l], g[l], c[l] }' |
+          sort -n -r | head -n 300 |
+          awk -F'\t' "$AJ"'{ printf "%s{\"h\":%s,\"ip\":%s,\"n\":%d,\"u\":%s,\"d\":%s,\"c\":{", (o++ ? "," : ""), j($2), j($3), $4, $5, $6
+            k = split($7, cs, " "); for (i = 1; i <= k; i++) { p = index(cs[i], "="); printf "%s%s:[%s]", (i > 1 ? "," : ""), j(substr(cs[i], 1, p - 1)), substr(cs[i], p + 1) }
+            printf "}}" }'
+      fi
+      printf ']}\n'
+    } >"$tc.tmp" && mv "$tc.tmp" "$tc"
+  fi
+  hdr; cat "$tc"
+  ;;
+
+proc)
+  pid=$(qp pid); case "$pid" in ''|*[!0-9]*) fail "неверный pid" ;; esac
+  st=$(qp st); case "$st" in *[!0-9]*) fail "неверный st" ;; esac
+  Q=/proc/$pid
+  alive=false
+  if [ -r "$Q/stat" ]; then
+    cst=$(sed 's/.*) //' "$Q/stat" | awk '{ print $20 }')
+    [ -z "$st" ] || [ "$cst" = "$st" ] && { alive=true; st=$cst; }
+  fi
+  hdr; printf '{"ok":true,"pid":%s,"alive":%s,' "$pid" "$alive"; info
+  printf ',"hist":'
+  H=$(lastfiles 360)
+  [ -n "$H" ] || H=/dev/null
+  awk -F'\t' -v p="$pid" -v s="$st" -v nc="$NCPU" "$AJ"'
+    FNR == 1 { U = $2; t = FILENAME; sub(/.*\//, "", t); next }
+    $1 == p && (s == "" || $7 == s) { c = (lu && U > lu) ? ($3 - lt) / (U - lu) * 100 / nc : -1
+      if (c >= 0) { TT = TT (TT == "" ? "" : ",") t; CC = CC (CC == "" ? "" : ",") r1(c); RR = RR (RR == "" ? "" : ",") $4 }
+      lu = U; lt = $3; nm = $8; pp = $2 }
+    END { printf "{\"t\":[%s],\"cpu\":[%s],\"rss\":[%s],\"name\":%s,\"ppid\":%d}", TT, CC, RR, j(nm), pp }' $H
+  printf ',"children":'
+  F=$(lastfiles 1)
+  if [ -n "$F" ]; then awk -F'\t' -v p="$pid" "$AJ"'FNR > 1 && $2 == p { printf "%s{\"pid\":%d,\"st\":%s,\"name\":%s,\"rss\":%d}", (k++ ? "," : "["), $1, $7, j($8), $4 } END { printf (k ? "]" : "[]") }' "$F"; else printf '[]'; fi
+  if [ "$alive" = true ]; then
+    cmd=$(tr '\0' ' ' <"$Q/cmdline" 2>/dev/null)
+    exe=$(readlink "$Q/exe" 2>/dev/null); cwd=$(readlink "$Q/cwd" 2>/dev/null)
+    fds=$(ls "$Q/fd" 2>/dev/null | wc -l)
+    uid=$(awk '/^Uid:/ { print $2 }' "$Q/status")
+    user=$(awk -F: -v u="$uid" '$3 == u { print $1; exit }' /etc/passwd)
+    bt=$(awk '/^btime/ { print $2 }' /proc/stat)
+    started=$(( bt + cst / 100 ))
+    printf ',"cmd":%s,"exe":%s,"cwd":%s,"fds":%d,"uid":%d,"user":%s,"started":%d' "$(js "$cmd")" "$(js "$exe")" "$(js "$cwd")" "$fds" "$uid" "$(js "$user")" "$started"
+    printf ',"status":{'
+    awk "$AJ"'BEGIN { split("Name State PPid Threads VmPeak VmSize VmRSS RssAnon RssFile RssShmem VmData VmStk VmExe VmLib VmSwap voluntary_ctxt_switches nonvoluntary_ctxt_switches", w, " "); for (i in w) want[w[i]] = 1 }
+      { k = $1; sub(/:$/, "", k); if (!(k in want)) next; $1 = ""; sub(/^ +/, ""); printf "%s%s:%s", (n++ ? "," : ""), j(k), j($0) }' "$Q/status"
+    printf '},"oom":%s' "$(cat "$Q/oom_score" 2>/dev/null || echo 0)"
+    # сетевые сокеты процесса
+    printf ',"sockets":['
+    netstat -lntup 2>/dev/null | awk -v p="$pid" "$AJ"'$NF ~ "^" p "/" || $(NF-1) ~ "^" p "/" { printf "%s{\"proto\":%s,\"addr\":%s}", (k++ ? "," : ""), j($1), j($4) }'
+    printf '],"conns":%d' "$(netstat -ntp 2>/dev/null | awk -v p="$pid" '$NF ~ "^" p "/" && $6 == "ESTABLISHED"' | wc -l)"
+    # потоки: два замера с интервалом 1 с
+    t1=$(cd "$Q/task" 2>/dev/null && cat [0-9]*/stat 2>/dev/null); read u1 _ </proc/uptime
+    sleep 1
+    t2=$(cd "$Q/task" 2>/dev/null && cat [0-9]*/stat 2>/dev/null); read u2 _ </proc/uptime
+    printf ',"threads":'
+    { printf '%s\n' "$t1" | sed 's/^/A /'; printf '%s\n' "$t2" | sed 's/^/B /'; } | awk -v nc="$NCPU" -v d="$(awk -v a="$u1" -v b="$u2" 'BEGIN { print (b - a) * 100 }')" "$AJ"'
+      NF > 3 { x = $0; sub(/^[AB] /, "", x); c = x; sub(/^[0-9]+ \(/, "", c); sub(/\) [A-Za-z] .*/, "", c); r = x; sub(/.*\) /, "", r); split(r, f, " ")
+        if ($1 == "A") a[$2] = f[12] + f[13]; else { o[++n] = $2; b[$2] = f[12] + f[13]; nm[$2] = c; s[$2] = f[1]; tot[$2] = f[12] + f[13] } }
+      END { printf "["; for (i = 1; i <= n; i++) { t = o[i]; cpu = (t in a && d > 0) ? (b[t] - a[t]) / d * 100 / nc : 0
+        printf "%s{\"tid\":%d,\"name\":%s,\"state\":%s,\"cpu\":%s,\"ticks\":%d}", (i > 1 ? "," : ""), t, j(nm[t]), j(s[t]), r1(cpu), tot[t] }; printf "]" }'
+  fi
+  printf '}\n'
+  ;;
+
+*) fail "неизвестное действие" ;;
+esac

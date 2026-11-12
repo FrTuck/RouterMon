@@ -1,0 +1,1687 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Мониторинг роутера</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --surface-2: #f3f2ee; --border: rgba(11,11,11,0.10);
+  --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781; --grid: #e1e0d9; --axis: #c3c2b7;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s7: #6250d6;
+  --free: #dcdbd4;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b; --good-text: #006300;
+  --link: #1c5cab; --hover: rgba(11,11,11,0.04); --sel: rgba(42,120,214,0.10);
+  /* светофор: дуги — цвета статусов, цифры — более тёмные оттенки, чтобы читались на светлом фоне */
+  --tl-good: #0ca30c; --tl-warn: #fab219; --tl-bad: #d03b3b; --tl-none: var(--axis);
+  --tl-good-t: #087a08; --tl-warn-t: #a36a00; --tl-bad-t: #c2302f; --tl-none-t: var(--muted);
+  --tl-neu: var(--s1); --tl-neu-t: var(--ink);
+}
+@media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) { --tl-good-t: #34c234; --tl-warn-t: #fab219; --tl-bad-t: #f06262; } }
+:root[data-theme="dark"] { --tl-good-t: #34c234; --tl-warn-t: #fab219; --tl-bad-t: #f06262; }
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232321; --border: rgba(255,255,255,0.10);
+    --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781; --grid: #2c2c2a; --axis: #383835;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s7: #9085e9;
+    --free: #3a3a37; --good-text: #0ca30c; --link: #86b6ef; --hover: rgba(255,255,255,0.05); --sel: rgba(57,135,229,0.16);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232321; --border: rgba(255,255,255,0.10);
+  --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781; --grid: #2c2c2a; --axis: #383835;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s7: #9085e9;
+  --free: #3a3a37; --good-text: #0ca30c; --link: #86b6ef; --hover: rgba(255,255,255,0.05); --sel: rgba(57,135,229,0.16);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button { font: inherit; color: inherit; }
+.mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.ink2 { color: var(--ink-2); }
+
+header { position: sticky; top: 0; z-index: 5; background: var(--page); border-bottom: 1px solid var(--border); }
+.bar { margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.brand { font-weight: 650; font-size: 15px; white-space: nowrap; color: var(--ink); }
+.brand:hover { text-decoration: none; color: var(--link); }
+.help { position: relative; display: inline-flex; }
+.help .gtip { left: 0; transform: none; top: 26px; width: max-content; max-width: min(420px, 86vw); }
+.help .qbtn:hover + .gtip, .help .qbtn:focus-visible + .gtip, .help.open .gtip { display: block; }
+.help .gtip b { color: var(--ink); }
+.crumbs { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; color: var(--ink-2); min-width: 0; }
+.crumbs .sep { color: var(--muted); }
+.crumbs b { color: var(--ink); font-weight: 600; }
+.spacer { flex: 1; }
+.tools { display: flex; gap: 8px; align-items: center; }
+.btn { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 5px 10px; cursor: pointer; white-space: nowrap; }
+.btn:hover { background: var(--surface-2); }
+.btn[aria-pressed="true"] { background: var(--sel); border-color: transparent; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: var(--surface); padding: 5px 12px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--sel); font-weight: 600; }
+.upd { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* узкий экран (телефон вертикально): кнопки отдельной строкой во всю ширину, «обновлено …» занимает остаток слева */
+@media (max-width: 520px) {
+  .bar { gap: 8px 10px; padding: 8px 12px; }
+  .bar .spacer { display: none; }
+  .tools { flex: 1 1 100%; min-width: 0; gap: 6px; }
+  .tools .upd { flex: 1 1 auto; }
+  .tools .btn { padding: 5px 9px; }
+  #add .wide { display: none; }
+  /* меню — во всю ширину под шапкой (header sticky, поэтому отсчёт от него) */
+  .tools .dd { position: static; }
+  .tools .dd-menu { left: 12px; right: 12px; width: auto; top: calc(100% - 4px); }
+}
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--good); margin-right: 5px; vertical-align: 1px; }
+.dot.stale { background: var(--muted); }
+
+/* страница — на всю ширину экрана */
+main { margin: 0 auto; padding: 16px; }
+h1 { font-size: 20px; margin: 0 0 2px; font-weight: 650; }
+h2 { font-size: 15px; margin: 0; font-weight: 600; }
+.sub { color: var(--ink-2); font-size: 13px; }
+/* «Имя: IP · модель · …» — одной строкой; если не влезает, хвост обрезается многоточием */
+.hline { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1 1 auto; }
+.hline h1 { margin: 0; white-space: nowrap; }
+.hline .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; min-width: 0; }
+.panel-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.panel-h .r { margin-left: auto; }
+/* один отступ между всеми окнами страницы — по горизонтали и по вертикали */
+:root { --gap: 12px; }
+.grid { display: grid; gap: var(--gap); }
+/* карточки роутеров: по 3 в ряд; если роутеров 1–2 — растягиваются на весь ряд */
+/* сетка из 6 долей: карточка в полном ряду занимает 6/колонок, карточки неполного последнего ряда делят его поровну (layoutCards) */
+.g-cards { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.g-cards > .card { grid-column: span 2; }
+/* сетка окон: 1, 2 или 3 равные колонки — у всех рядов страницы одни и те же границы колонок, поэтому промежутки
+   между окнами сходятся прямым крестом */
+.g-2, .g-12 { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1086px) { .g-2, .g-12 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1620px) { .g-2, .g-12 { grid-template-columns: repeat(3, minmax(0, 1fr)); } .g-12 > :last-child { grid-column: span 2; } }
+.section { margin-top: var(--gap); }
+/* «Интерфейсы» + «Топ адресов»: по той же сетке, что графики над ними; при трёх колонках топ занимает две */
+.g-12 { align-items: start; }
+/* два равных окна на всю ширину (графики приёма и передачи, окна процесса); на узком экране — одно под другим */
+.g-eq { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 900px) { .g-eq { grid-template-columns: minmax(0, 1fr); } }
+/* вкладки страницы роутера */
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.tabs a { padding: 7px 14px; color: var(--ink-2); font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tabs a:hover { color: var(--ink); text-decoration: none; }
+.tabs a.on { color: var(--ink); border-bottom-color: var(--s1); }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 7px; vertical-align: -1px; }
+.vol { display: inline-block; width: 40px; height: 6px; background: var(--surface-2); border-radius: 3px; vertical-align: middle; margin-right: 6px; overflow: hidden; }
+.vol i { display: block; height: 100%; border-radius: 3px; }
+td.ck { width: 26px; padding-right: 0; }
+td.ck input { margin: 0; cursor: pointer; }
+.role { color: var(--ink-2); font-size: 12.5px; white-space: nowrap; }
+#td-tab th, #td-tab td { padding-left: 4px; padding-right: 4px; }
+/* верхняя строка показателей — равномерно по всей ширине; на телефоне — по два в ряд */
+.kpis.even { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px 24px; }
+.kpis.even .kpi { min-width: 0; }
+.kpis.even .kpi .s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 640px) { .kpis.even { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+a.kpi { color: inherit; border-radius: 8px; margin: -4px -6px; padding: 4px 6px; }
+a.kpi:hover { text-decoration: none; background: var(--hover); }
+a.kpi .l { color: var(--link); }
+.sig-good { color: var(--tl-good-t); } .sig-warn { color: var(--tl-warn-t); } .sig-bad { color: var(--tl-bad-t); }
+.err { background: var(--surface); border: 1px solid var(--critical); border-radius: 10px; padding: 12px 14px; }
+
+/* карточка роутера */
+/* subgrid: одинаковые блоки соседних карточек стоят на одной высоте, даже если где-то текст длиннее */
+.card { cursor: pointer; transition: border-color .15s; display: grid; grid-template-rows: subgrid; grid-row: span 6; row-gap: 12px; align-content: start; }
+.card > * { min-width: 0; }
+.card:hover { border-color: var(--axis); }
+.card-h { display: flex; gap: 10px; align-items: flex-start; }
+.card-h .t { min-width: 0; flex: 1; }
+.card-h .name { font-size: 17px; font-weight: 650; }
+.card-h .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .foot { display: flex; justify-content: space-between; align-items: end; gap: 10px; }
+.card .kpi .s, .card .kpi .l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--link); cursor: pointer; font-size: 13px; }
+.linkbtn:hover { text-decoration: underline; }
+.trash { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 7px; border: 1px solid transparent; background: none; color: var(--muted); cursor: pointer; padding: 0; vertical-align: middle; }
+.trash:hover { color: var(--critical); border-color: var(--border); background: var(--surface-2); }
+/* «+ Добавить роутер» — выпадающий список: убранные роутеры + ввод IP */
+.dd { position: relative; display: inline-flex; }
+.dd-menu { display: none; position: absolute; right: 0; top: calc(100% + 6px); z-index: 8; width: min(320px, calc(100vw - 24px)); background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.22); padding: 6px; }
+.dd.open .dd-menu { display: block; }
+.dd-menu .dh { font-size: 12px; color: var(--muted); padding: 6px 8px 4px; }
+.dd-menu .di { display: flex; width: 100%; gap: 8px; align-items: baseline; text-align: left; background: none; border: 0; border-radius: 7px; padding: 7px 8px; cursor: pointer; color: var(--ink); font: inherit; }
+.dd-menu .di:hover, .dd-menu .di:focus-visible { background: var(--hover); outline: none; }
+.dd-menu .di .ip { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.dd-menu .de { font-size: 13px; color: var(--muted); padding: 4px 8px 8px; }
+.dd-menu hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }
+.dd-menu .dip { display: flex; gap: 6px; padding: 2px 4px 4px; }
+.dd-menu .dip input { flex: 1; min-width: 0; font: inherit; color: inherit; background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 5px 9px; }
+
+/* мастер добавления роутера */
+dialog.modal { border: 1px solid var(--border); border-radius: 14px; padding: 0; background: var(--surface); color: var(--ink); width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
+dialog.modal::backdrop { background: rgba(0,0,0,.45); }
+.modal .mh { display: flex; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface); z-index: 1; }
+.modal .mh h2 { font-size: 16px; }
+.modal .mb { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+.modal .mf { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--border); position: sticky; bottom: 0; background: var(--surface); }
+.modal input[type=text], .modal input[type=password] { font: inherit; color: inherit; background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; width: 100%; }
+.modal .row2 { display: flex; gap: 8px; }
+.modal .row2 input { flex: 1; }
+.btn.primary { background: var(--s1); color: #fff; border-color: transparent; font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.08); background: var(--s1); }
+.btn:disabled { opacity: .45; cursor: default; filter: none; }
+.access { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.access h3 { margin: 0; font-size: 14px; display: flex; gap: 8px; align-items: center; }
+.access .opt { font-size: 11px; font-weight: 600; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
+.access p { margin: 0; font-size: 13px; color: var(--ink-2); }
+.access p b { color: var(--ink); font-weight: 600; }
+.access ul { margin: 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); }
+.access .risk { border-left: 3px solid var(--serious); padding-left: 10px; }
+.access label.ok { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; font-weight: 600; margin-top: 4px; cursor: pointer; }
+.checks svg { width: 14px; height: 14px; }
+.checks { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 13px; align-items: center; }
+.msg { font-size: 13px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); display: flex; gap: 8px; align-items: flex-start; }
+.msg svg { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+.msg pre { margin: 6px 0 0; white-space: pre-wrap; font-size: 11.5px; color: var(--muted); }
+.kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px 14px; }
+.kpi .l { font-size: 12px; color: var(--ink-2); }
+.kpi .v { font-size: 22px; font-weight: 600; line-height: 1.2; }
+.kpi .v small { font-size: 13px; font-weight: 500; color: inherit; opacity: .8; margin-left: 2px; }
+.kpi .s { font-size: 12px; color: var(--muted); }
+.sparks { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.spark .l { font-size: 12px; color: var(--ink-2); display: flex; justify-content: space-between; }
+/* мини-графики растягиваются по высоте, если карточкам досталось свободное место */
+.sparks.grow { align-items: stretch; }
+/* каждый мини-график — отдельная рамка: заголовок, шкала слева, сам график */
+.sparks.grow { gap: 14px; }
+.spark { display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--grid); border-radius: 8px; padding: 6px 8px 8px; gap: 4px; }
+.spk { flex: 1 1 auto; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px; min-height: 48px; }
+.spk-y { position: relative; min-width: 30px; font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.spk-y span { position: absolute; right: 0; transform: translateY(-50%); white-space: nowrap; line-height: 1; }
+.spark svg { display: block; width: 100%; height: 100%; min-height: 48px; overflow: visible; }
+/* сворачиваемая панель */
+.fold-h { cursor: pointer; user-select: none; margin-bottom: 0; }
+.fold-h .chev { display: inline-block; width: 14px; color: var(--muted); transition: transform .15s; }
+.fold.open .fold-h { margin-bottom: 10px; }
+.fold.open .fold-h .chev { transform: rotate(90deg); }
+.fold:not(.open) .fold-b { display: none; }
+.meter { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--s1); border-radius: 3px; }
+.disk { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; font-size: 12.5px; }
+.disk .meter { grid-column: 1 / -1; margin-bottom: 4px; }
+
+/* значки состояния — всегда в один ряд: при нехватке места сжимается текст (полный — во всплывающей подсказке), а не переносится строка */
+.badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; color: var(--ink); min-width: 0; flex: 0 1 auto; }
+.badge span { overflow: hidden; text-overflow: ellipsis; }
+.badge svg { width: 12px; height: 12px; flex: none; }
+.badges { display: flex; gap: 6px; flex-wrap: nowrap; margin-left: auto; justify-content: flex-end; min-width: 0; flex: 0 1 auto; }
+.card-h .badges { max-width: 62%; }
+
+/* таблицы */
+.tbl-wrap { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
+table { border-collapse: collapse; width: 100%; }
+th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+th { font-size: 12px; font-weight: 600; color: var(--ink-2); white-space: nowrap; user-select: none; position: sticky; top: 0; background: var(--surface); }
+th.sort { cursor: pointer; }
+th.sort:hover { color: var(--ink); }
+th.on::after { content: " ▾"; }
+th.on.asc::after { content: " ▴"; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.click { cursor: pointer; }
+tr.click:hover td { background: var(--hover); }
+tr.grp td { font-weight: 600; }
+tr.member td:first-child { padding-left: 26px; }
+tr.gone td { color: var(--muted); }
+.pname { font-weight: 600; }
+.pcmd { color: var(--muted); font-size: 12px; max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.cpubar { display: inline-block; width: 46px; height: 6px; background: var(--surface-2); border-radius: 3px; vertical-align: middle; margin-right: 6px; overflow: hidden; }
+.cpubar i { display: block; height: 100%; background: var(--s1); border-radius: 3px; }
+.up { color: var(--critical); }
+.tag { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 4px; font-weight: 500; }
+.filters { display: flex; gap: 8px 14px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.filters input[type=search] { font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; width: 220px; max-width: 100%; }
+.filters label { display: inline-flex; gap: 5px; align-items: center; color: var(--ink-2); cursor: pointer; white-space: nowrap; }
+.mini-top { table-layout: fixed; }
+.mini-top td { padding: 4px 6px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini-top th:first-child { width: auto; }
+.mini-top th:nth-child(2) { width: 58px; }
+.mini-top th:nth-child(3) { width: 74px; }
+.mini-top th { overflow: hidden; text-overflow: ellipsis; }
+.mini-top th { padding: 3px 6px; }
+
+/* графики */
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart .tick { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.legend { display: flex; gap: 4px 14px; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); margin-bottom: 6px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.legend i.ln { height: 3px; border-radius: 2px; }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.12); white-space: nowrap; z-index: 3; display: none; }
+.tip .tt { color: var(--ink-2); margin-bottom: 3px; }
+.tip .row { display: flex; gap: 8px; align-items: center; }
+.tip .row i { width: 8px; height: 8px; border-radius: 2px; }
+.tip .row .v { margin-left: auto; padding-left: 12px; font-variant-numeric: tabular-nums; font-weight: 600; }
+/* циферблаты равномерно по всей ширине панели, всегда в одну строку: на узком экране уменьшаются (число внутри SVG масштабируется вместе с дугой) */
+.gauges { display: flex; flex-wrap: nowrap; justify-content: space-around; gap: 4px; }
+.gauge { flex: 1 1 0; min-width: 0; max-width: 230px; text-align: center; position: relative; border-radius: 10px; padding: 6px 6px 2px; }
+@media (max-width: 760px) {
+  .gauges:not(.sm) { gap: 0; }
+  .gauges:not(.sm) .gauge { padding: 4px 1px 0; }
+  .gauges:not(.sm) .gh { gap: 3px; }
+  .gauges:not(.sm) .gl { font-size: 11px; }
+  .gauges:not(.sm) .qbtn { width: 14px; height: 14px; font-size: 9px; line-height: 12px; }
+  .gauges:not(.sm) .gtip { top: 22px; }
+}
+@media (max-width: 480px) {
+  .gauges:not(.sm) .gh { gap: 2px; }
+  .gauges:not(.sm) .gl { font-size: 10px; letter-spacing: -.2px; }
+  .gauges:not(.sm) .qbtn { width: 12px; height: 12px; font-size: 8px; line-height: 10px; }
+}
+.gauge.go { cursor: pointer; transition: background .12s; }
+.gauge.go:hover { background: var(--hover); }
+.gauge.go:focus-visible { outline: 2px solid var(--s1); outline-offset: 1px; }
+.gauge .gh { display: flex; justify-content: center; align-items: center; gap: 6px; min-width: 0; }
+.gauge .gl { font-size: 13px; font-weight: 600; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gauge svg { display: block; width: 100%; max-width: 180px; margin: 2px auto 0; }
+.gauge .gv { font-size: 21px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.gauge .gu { font-size: 11px; font-weight: 600; }
+.gauge svg .gv.gv2 { font-size: 18px; }
+.gauge .gm { font-size: 9.5px; font-weight: 600; fill: var(--ink-2); }
+.qbtn { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--axis); background: var(--surface); color: var(--ink-2); font-size: 11px; font-weight: 700; line-height: 16px; padding: 0; cursor: help; }
+.qbtn:hover, .gauge.open .qbtn { border-color: var(--s1); color: var(--s1); }
+.gtip { display: none; position: absolute; top: 30px; left: 50%; transform: translateX(-50%); z-index: 6; width: max-content; max-width: min(270px, 86vw);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.5; text-align: left; color: var(--ink-2); box-shadow: 0 6px 20px rgba(0,0,0,.18); cursor: default; }
+.gtip .gt-go { color: var(--link); margin-top: 4px; }
+.gauge .qbtn:hover + .gtip, .gauge .qbtn:focus-visible + .gtip, .gauge.open .gtip { display: block; }
+.gauge:first-child .gtip { left: 0; transform: none; }
+.gauge:last-child .gtip { left: auto; right: 0; transform: none; }
+/* компактные циферблаты в карточках роутеров */
+/* ровная сетка: при переносе на вторую строку циферблаты остаются того же размера */
+.gauges.sm { display: grid; grid-template-columns: repeat(auto-fit, minmax(74px, 1fr)); gap: 2px 0; }
+.gauges.sm .gauge { min-width: 0; max-width: none; padding: 4px 2px 0; }
+/* узкая карточка: мини-таблицы и мини-графики одна под другой, чтобы названия процессов не пропадали */
+/* (класс narrow ставит layoutCards по ширине карточки; container queries не годятся — они отключают subgrid) */
+.card.narrow .sparks { grid-template-columns: 1fr; }
+/* шесть циферблатов не помещаются в ряд — ровно два ряда по три, а не 4 + 2 */
+.card.g3 .gauges.sm { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.card .foot > * { white-space: nowrap; }
+.gauges.sm .gh { gap: 4px; }
+.gauges.sm .gl { font-size: 12px; }
+.gauges.sm .qbtn { width: 16px; height: 16px; font-size: 10px; line-height: 14px; }
+.gauges.sm svg { max-width: 150px; margin-top: 0; }
+.gauges.sm .gv { font-size: 22px; }
+.gauges.sm .gu { font-size: 12px; }
+.gauges.sm .gtip { top: 26px; }
+.flash { animation: flash 1.2s ease-out; }
+@keyframes flash { 0% { box-shadow: 0 0 0 3px var(--s1); } 100% { box-shadow: 0 0 0 3px transparent; } }
+.empty { color: var(--muted); font-size: 13px; padding: 24px 0; text-align: center; }
+
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; font-size: 13px; }
+.kv dt { color: var(--ink-2); }
+.kv dd { margin: 0; word-break: break-all; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 12.5px; background: var(--surface-2); }
+.banner { border: 1px solid var(--serious); border-radius: 10px; padding: 10px 14px; margin-bottom: var(--gap); background: var(--surface); display: flex; gap: 10px; align-items: center; font-size: 14px; }
+.banner svg { width: 16px; height: 16px; flex: none; }
+
+@media (max-width: 640px) {
+  .kpi .v { font-size: 19px; }
+  .sparks { grid-template-columns: 1fr; }
+  .pcmd { max-width: 220px; }
+  .hide-sm { display: none; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <a class="brand" href="#/">Мониторинг роутера</a>
+    <span class="help" id="help"><button type="button" class="qbtn" aria-label="Справка по странице">?</button><div class="gtip" id="help-tip" role="tooltip"></div></span>
+    <nav class="crumbs" id="crumbs"></nav>
+    <span class="spacer"></span>
+    <div class="tools">
+      <span class="upd" id="upd"></span>
+      <span class="dd" id="add-dd"><button class="btn" id="add" aria-haspopup="true" aria-expanded="false" title="Вернуть убранный роутер или добавить новый по IP">+ Добавить<span class="wide"> роутер</span> ▾</button><div class="dd-menu" id="add-menu"></div></span>
+      <button class="btn" id="pause" aria-pressed="false" title="Остановить автообновление">Пауза</button>
+      <button class="btn" id="theme" title="Светлая / тёмная тема">◐</button>
+    </div>
+  </div>
+</header>
+<main id="main"></main>
+
+<script>
+'use strict';
+const PORT = 8089, REFRESH = 10000;
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
+// ---------- форматирование ----------
+const f1 = x => (x == null || isNaN(x)) ? '—' : (Math.abs(x) >= 100 ? Math.round(x).toString() : (+x).toFixed(1).replace('.', ','));
+const pct = x => f1(x) + '%';
+function mb(x) { if (x == null || isNaN(x)) return '—'; if (Math.abs(x) >= 1024) return (x / 1024).toFixed(1).replace('.', ',') + ' ГБ'; return f1(x) + ' МБ'; }
+const kb = x => mb(x / 1024);
+function bytesK(k) { const g = k / 1048576; if (g >= 1024) return (g / 1024).toFixed(1).replace('.', ',') + ' ТБ'; if (g >= 1) return g.toFixed(1).replace('.', ',') + ' ГБ'; return (k / 1024).toFixed(0) + ' МБ'; }
+function bytes(b) {
+  if (b == null || isNaN(b)) return '—'; const u = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ']; let i = 0; b = +b;
+  while (b >= 1024 && i < 4) { b /= 1024; i++; }
+  return (i ? (b >= 100 ? Math.round(b) : b.toFixed(1).replace('.', ',')) : Math.round(b)) + ' ' + u[i];
+}
+// ряды с разных роутеров — на общую шкалу времени (у каждого роутера свои отметки): пропуски заполняются предыдущим значением
+function alignSeries(list) {
+  const dts = []; list.forEach(s => { for (let i = 1; i < s.t.length; i++) dts.push(s.t[i] - s.t[i - 1]); });
+  dts.sort((a, b) => a - b); const step = dts[Math.floor(dts.length / 2)] || 10;
+  const keys = new Set(), maps = list.map(s => { const m = new Map(); s.t.forEach((t, i) => { const k = Math.round(t / step); m.set(k, s.v[i]); keys.add(k); }); return m; });
+  const ks = [...keys].sort((a, b) => a - b);
+  return { t: ks.map(k => k * step), vs: maps.map(m => { let p = 0; return ks.map(k => (m.has(k) ? (p = m.get(k)) : p)); }) };
+}
+function mbit(x) { if (x == null || isNaN(x)) return '—'; if (x < 1) return Math.round(x * 1000) + ' кбит/с'; return f1(x) + ' Мбит/с'; }
+function dur(s) {
+  s = Math.max(0, Math.round(s)); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  const r = d ? `${d} д ${h} ч` : h ? `${h} ч ${m} мин` : m ? `${m} мин` : `${s} с`;
+  return r.replace(/ /g, ' ');   // неразрывные пробелы: «5 ч 45 мин» не переносится по частям
+}
+const hhmm = t => { const d = new Date(t * 1000); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+const hhmmss = t => hhmm(t) + ':' + String(new Date(t * 1000).getSeconds()).padStart(2, '0');
+const dt = t => new Date(t * 1000).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const last = a => (a && a.length) ? a[a.length - 1] : null;
+// ---------- периоды графиков (в минутах): 15, 30, 45 минут, 1 час, затем +2 часа, 24 часа ----------
+// 0 — «Всё»: вся имеющаяся история
+const RANGES = [15, 30, 45, 60, 180, 300, 420, 540, 660, 780, 900, 1020, 1140, 1260, 1380, 1440, 0];
+const plural = (n, a, b, c) => { const m10 = n % 10, m100 = n % 100; return m10 === 1 && m100 !== 11 ? a : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? b : c; };
+const rangeLabel = m => m === 0 ? 'Всё' : m < 60 ? `${m} ${plural(m, 'минута', 'минуты', 'минут')}` : `${m / 60} ${plural(m / 60, 'час', 'часа', 'часов')}`;
+const rangeFor = m => m === 0 ? 'всё время наблюдений' : m < 60 ? `${m} ${plural(m, 'минуту', 'минуты', 'минут')}` : rangeLabel(m);
+
+// ---------- светофор: пороги жёлтого и красного (те же, что у значков состояния) ----------
+const TH = { cpu: [70, 90], mem: [80, 90], swap: [50, 80], temp: [85, 95] };
+const lvl = (v, th) => (v == null || isNaN(v)) ? 'none' : v >= th[1] ? 'bad' : v >= th[0] ? 'warn' : 'good';
+const tlText = (v, th) => `color:var(--tl-${lvl(v, th)}-t)`;
+// модули Wi-Fi для циферблата t° Wi-Fi: дуги (первая — внешняя) и строки подсказки
+const wArcs = j => (j.wmods || []).map(w => ({ n: w.n, short: w.n.replace(/\s*ГГц$/, ''), v: w.t }));
+const wTip = j => { const a = wArcs(j); return a.length > 1
+  ? a.map((w, i) => `${i ? 'Внутренняя' : 'Внешняя'} шкала — ${w.n}: ${f1(w.v)} °C.`).join(' ')
+  : a.length && a[0].n.includes('+') ? `Один датчик на весь радиочип (${a[0].n}): оба диапазона работают на одном чипе.` : ''; };
+// циферблат в стиле Grafana: дуга 240°, снаружи тонкая шкала порогов, число в центре окрашено по светофору
+function gauge(o) {
+  // o.neutral — величина без «хорошо/плохо» (скорость канала): синяя дуга, обычный цвет цифры, шкала порогов серая
+  const min = o.min || 0, max = o.max || 100, v = +o.value, l = o.neutral ? (isNaN(v) ? 'none' : 'neu') : lvl(v, o.th || [Infinity, Infinity]);
+  if (!o.th) o.th = [max, max];
+  const fr = x => Math.max(0, Math.min(1, ((+x) - min) / (max - min)));
+  const A0 = 150, SW = 240, cx = 60, cy = 58;
+  const pt = (a, r) => [(cx + r * Math.cos(a * Math.PI / 180)).toFixed(2), (cy + r * Math.sin(a * Math.PI / 180)).toFixed(2)];
+  const arc = (f0, f1, r) => { if (f1 - f0 < 0.002) return ''; const a0 = A0 + SW * f0, a1 = A0 + SW * f1, [x0, y0] = pt(a0, r), [x1, y1] = pt(a1, r); return `M${x0},${y0}A${r},${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1},${y1}`; };
+  const t0 = fr(o.th[0]), t1 = fr(o.th[1]);
+  // o.arcs — несколько величин на одном циферблате (датчики модулей Wi-Fi): по концентрической дуге на каждую,
+  // первая — внешняя; в центре — максимальная, внизу — подписи
+  const multi = Array.isArray(o.arcs) && o.arcs.length > 1;
+  const txt = o.text != null ? o.text : (isNaN(v) ? '—' : (o.fmt || f1)(v) + (o.unit ? ' ' + o.unit : ''));
+  const m = String(txt).match(/^(\S+)\s(.+)$/), big = m ? m[1] : txt, unit = m ? m[2] : '';
+  // пояснения — во всплывающей подсказке «?» (наведение или щелчок), чтобы под циферблатами не было мелкого текста
+  const tip = [o.title, o.sub, o.sub2].filter(Boolean).map(s => `<div>${esc(s)}</div>`).join('') + (o.goText ? `<div class="gt-go">Щёлкните по циферблату — ${esc(o.goText)}</div>` : '');
+  return `<div class="gauge${o.go ? ' go' : ''}" data-key="${esc(o.key || o.label)}" ${o.ip ? `data-ip="${esc(o.ip)}"` : ''} ${o.go ? `role="link" tabindex="0" data-go='${esc(JSON.stringify(o.go))}'` : ''}>
+    <div class="gh"><span class="gl">${esc(o.label)}</span>${tip ? `<button type="button" class="qbtn" aria-label="Пояснение: ${esc(o.label)}">?</button><div class="gtip" role="tooltip">${tip}</div>` : ''}</div>
+    <svg viewBox="0 0 120 92" role="img" aria-label="${esc(o.label)}: ${esc(txt)}">
+      ${o.neutral ? `<path d="${arc(0, 1, 49)}" stroke="var(--axis)" stroke-width="3" fill="none"/>` : `
+      <path d="${arc(0, t0, 49)}" stroke="var(--tl-good)" stroke-width="3" fill="none"/>
+      <path d="${arc(t0, t1, 49)}" stroke="var(--tl-warn)" stroke-width="3" fill="none"/>
+      <path d="${arc(t1, 1, 49)}" stroke="var(--tl-bad)" stroke-width="3" fill="none"/>`}
+      ${multi ? o.arcs.map((a, i) => { const r = 43 - i * 9, al = lvl(a.v, o.th);
+        return `<path d="${arc(0, 1, r)}" stroke="var(--surface-2)" stroke-width="7" fill="none"/>
+      <path d="${arc(0, fr(a.v), r)}" stroke="var(--tl-${al})" stroke-width="7" fill="none"><title>${esc(a.n)}: ${esc(f1(a.v))} ${esc(o.unit || '')}</title></path>`; }).join('') + `
+      <text x="60" y="90" text-anchor="middle" class="gm">${o.arcs.map(a => `${esc(a.short)}: ${esc(Math.round(a.v))}°`).join('  ')}</text>` : `
+      <path d="${arc(0, 1, 40)}" stroke="var(--surface-2)" stroke-width="11" fill="none"/>
+      <path d="${isNaN(v) ? '' : arc(0, fr(v), 40)}" stroke="var(--tl-${l})" stroke-width="11" fill="none"/>`}
+      <text x="60" y="${multi ? 66 : 64}" text-anchor="middle" class="gv${multi ? ' gv2' : ''}" style="fill:var(--tl-${l}-t)">${esc(big)}<tspan class="gu" dx="2">${esc(unit)}</tspan></text>
+    </svg>
+  </div>`;
+}
+// подсказки «?» у циферблатов: наведение — показать, щелчок — закрепить; открытая подсказка переживает автообновление
+let openGaugeKey = null;
+function bindGaugeTips(root) {
+  root.querySelectorAll('.gauge').forEach(g => {
+    const key = (g.dataset.ip || '') + '|' + g.dataset.key;
+    if (openGaugeKey === key) g.classList.add('open');
+    const q = $('.qbtn', g);
+    if (q) q.onclick = e => {
+      e.stopPropagation(); const was = g.classList.contains('open');
+      document.querySelectorAll('.gauge.open').forEach(x => x.classList.remove('open'));
+      if (!was) g.classList.add('open'); openGaugeKey = was ? null : key;
+    };
+    const tp = $('.gtip', g); if (tp) tp.onclick = e => e.stopPropagation();
+  });
+}
+document.addEventListener('click', () => { openGaugeKey = null; document.querySelectorAll('.gauge.open').forEach(x => x.classList.remove('open')); });
+// прокрутить к блоку (под шапку) и подсветить его. Если плавная прокрутка не пошла (вкладка в фоне,
+// «уменьшить движение» в системе) — прыгнуть сразу.
+function scrollToPanel(p) {
+  const top = Math.max(0, p.getBoundingClientRect().top + window.scrollY - 64), from = window.scrollY;
+  window.scrollTo({ top, behavior: 'smooth' });
+  setTimeout(() => { if (Math.abs(window.scrollY - from) < 2 && Math.abs(top - from) > 2) window.scrollTo(0, top); }, 400);
+  p.classList.remove('flash'); void p.offsetWidth; p.classList.add('flash');
+}
+// переход с циферблата карточки на роутер: таблица процессов откроется с этой сортировкой
+let pendingGo = null;
+const STATE = { R: 'выполняется', S: 'ожидает', D: 'ждёт диск', Z: 'зомби', T: 'остановлен', I: 'простаивает', t: 'трассировка', X: 'завершён' };
+
+// ---------- API ----------
+function get(url) {
+  const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 25000);
+  return fetch(url, { signal: ctl.signal, cache: 'no-store' })
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .catch(e => { const x = new Error(e.name === 'AbortError' ? 'нет ответа' : e.message === 'Failed to fetch' ? 'нет связи' : e.message); x.net = true; throw x; })
+    .finally(() => clearTimeout(tm));
+}
+// к соседнему роутеру — напрямую (CORS); если браузер не пускает — через роутер, с которого открыта страница
+const viaRelay = new Set();
+async function api(ip, q) {
+  let j;
+  if (!ip || ip === location.hostname) j = await get(`/cgi-bin/api?${q}`);
+  else if (viaRelay.has(ip)) j = await get(`/cgi-bin/api?a=relay&ip=${ip}&q=${encodeURIComponent(q)}`);
+  else {
+    try { j = await get(`http://${ip}:${PORT}/cgi-bin/api?${q}`); }
+    catch (e) { if (!e.net) throw e; viaRelay.add(ip); j = await get(`/cgi-bin/api?a=relay&ip=${ip}&q=${encodeURIComponent(q)}`); }
+  }
+  if (!j.ok) throw new Error(j.error || 'ошибка');
+  return j;
+}
+let peersCache = null, manual = new Set(), hiddenList = [], lanInfo = { self: location.hostname, lan: '' };
+async function peers(force) {
+  if (peersCache && !force) return peersCache;
+  try {
+    const j = await api('', 'a=peers'); peersCache = j.peers.length ? j.peers : [location.hostname];
+    manual = new Set(j.manual || []); hiddenList = j.hidden || []; lanInfo = { self: j.self, lan: j.lan || '' };
+  } catch { peersCache = [location.hostname]; }
+  setTimeout(() => peersCache = null, 120000);
+  return peersCache;
+}
+// POST на свой роутер (тело application/json — защита от запросов с чужих сайтов)
+async function post(q, data) {
+  const r = await fetch(`/cgi-bin/api?${q}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data), cache: 'no-store' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const j = await r.json(); if (!j.ok) throw new Error(j.error || 'ошибка'); return j;
+}
+
+// ---------- состояние роутера ----------
+const ICON = {
+  good: '<svg viewBox="0 0 12 12" width="14" height="14" aria-hidden="true"><circle cx="6" cy="6" r="6" fill="var(--good)"/><path d="M3.3 6.2l1.8 1.8 3.6-3.8" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  warning: '<svg viewBox="0 0 12 12" width="14" height="14" aria-hidden="true"><path d="M6 .6l5.6 10.2H.4z" fill="var(--warning)"/><path d="M6 4.3v3" stroke="#0b0b0b" stroke-width="1.4" stroke-linecap="round"/><circle cx="6" cy="9" r=".8" fill="#0b0b0b"/></svg>',
+  serious: '<svg viewBox="0 0 12 12" width="14" height="14" aria-hidden="true"><path d="M6 .6l5.6 10.2H.4z" fill="var(--serious)"/><path d="M6 4.3v3" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/><circle cx="6" cy="9" r=".8" fill="#fff"/></svg>',
+  critical: '<svg viewBox="0 0 12 12" width="14" height="14" aria-hidden="true"><circle cx="6" cy="6" r="6" fill="var(--critical)"/><path d="M4 4l4 4M8 4l-4 4" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg>',
+};
+// корзина на карточке: убрать роутер с главной (кроме роутера, с которого открыта страница)
+const TRASH = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M6 4V2.6h4V4M4 4l.7 9.4h6.6L12 4M6.6 6.6v4.6M9.4 6.6v4.6"/></svg>';
+const trashBtn = (ip, name) => ip === lanInfo.self ? '' :
+  `<button type="button" class="trash" data-forget="${esc(ip)}" title="Убрать ${esc(name)} с главной — вернуть можно в списке «+ Добавить роутер»" aria-label="Убрать ${esc(name)} с главной">${TRASH}</button>`;
+const badge = (lvl, text, title = '') => `<span class="badge" title="${esc(text + (title ? ': ' + title : ''))}">${ICON[lvl]}<span>${esc(text)}</span></span>`;
+function curOf(j) {
+  const c = j.cur || {}, g = k => last(c[k]);
+  const total = (g('anon') || 0) + (g('kern') || 0) + (g('cache') || 0) + (g('shm') || 0) + (g('free') || 0);
+  return { cpu: (g('user') || 0) + (g('sys') || 0) + (g('irq') || 0) + (g('io') || 0), user: g('user'), sys: g('sys'), irq: g('irq'), io: g('io'),
+    total, avail: g('avail'), usedPct: total ? (total - g('avail')) / total * 100 : null, anon: g('anon'), kern: g('kern'), swap: g('swap'),
+    load: g('load'), temp: g('temp'), wtemp: g('wtemp'), ok: c.t && c.t.length > 0 };
+}
+function health(j) {
+  const c = curOf(j), out = [];
+  if (j.age < 0 || j.age > 60 || !c.ok) out.push(['critical', 'Сборщик не работает', 'Нет свежих данных от службы rmon на роутере']);
+  else {
+    const availPct = c.total ? c.avail / c.total * 100 : 100;
+    if (availPct < 10) out.push(['critical', 'Мало памяти', `Доступно ${mb(c.avail)} из ${mb(c.total)}`]);
+    else if (availPct < 20) out.push(['warning', 'Памяти мало', `Доступно ${mb(c.avail)} из ${mb(c.total)}`]);
+    if (c.cpu >= 90) out.push(['serious', 'CPU загружен', `CPU ${pct(c.cpu)}`]);
+    else if (c.cpu >= 70) out.push(['warning', 'CPU нагружен', `CPU ${pct(c.cpu)}`]);
+    if (c.temp >= 95) out.push(['critical', 'Перегрев', `CPU ${f1(c.temp)} °C`]);
+    else if (c.temp >= 85) out.push(['warning', 'Горячо', `CPU ${f1(c.temp)} °C`]);
+    for (const d of j.disks || []) if (d.mp !== '/' && d.used / d.total > 0.95) out.push(['warning', 'Диск заполнен', `${d.mp}: ${Math.round(d.used / d.total * 100)}%`]);
+  }
+  if (!out.length) out.push(['good', 'Норма', '']);
+  return out;
+}
+
+// ---------- графики ----------
+const NS = 'http://www.w3.org/2000/svg';
+// максимум оси = 4 «круглых» шага
+function niceMax(v) { if (!(v > 0)) return 1; const s = v / 4, p = Math.pow(10, Math.floor(Math.log10(s))), n = s / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p * 4; }
+const axisFmt = v => String(Math.round(v * 100) / 100).replace('.', ',');
+function timeStep(span) { for (const s of [60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600]) if (span / s <= 6) return s; return 43200; }
+
+class Chart {
+  // opt: {h, stacked, unit, fmt, max, ref:{v,label}, legend:bool}
+  constructor(el, opt = {}) {
+    this.el = el; this.opt = opt; el.classList.add('chart');
+    el.innerHTML = `<div class="legend"></div><svg></svg><div class="tip"></div>`;
+    this.svg = $('svg', el); this.tip = $('.tip', el); this.lg = $('.legend', el); this.hx = null;
+    this.ro = new ResizeObserver(() => this.draw()); this.ro.observe(el);
+    const mv = e => { const r = this.svg.getBoundingClientRect(); const x = (e.touches ? e.touches[0].clientX : e.clientX) - r.left; this.hx = x; this.hover(); };
+    this.svg.addEventListener('mousemove', mv); this.svg.addEventListener('touchstart', mv, { passive: true }); this.svg.addEventListener('touchmove', mv, { passive: true });
+    this.svg.addEventListener('mouseleave', () => { this.hx = null; this.hover(); });
+  }
+  set(t, series) { this.t = t || []; this.s = series; this.draw(); }
+  draw() {
+    const o = this.opt, t = this.t, S = this.s; if (!S) return;
+    const W = Math.max(200, this.el.clientWidth), H = o.h || 170, L = 46, R = 10, T = 8, B = 22;
+    this.geo = { W, H, L, R, T, B };
+    const lgShow = S.length > 1 && o.legend !== false;
+    this.lg.style.display = lgShow ? '' : 'none';
+    if (lgShow) this.lg.innerHTML = S.map(s => `<span><i class="${o.stacked ? '' : 'ln'}" style="background:${s.color}"></i>${esc(s.name)}</span>`).join('');
+    const svg = this.svg; svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('height', H); svg.innerHTML = '';
+    const n = t.length;
+    if (n < 2) { svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" class="tick">Данные ещё собираются…</text>`; return; }
+    // накопленные значения
+    const cum = []; let top = 0;
+    S.forEach((s, k) => { cum[k] = s.v.map((v, i) => (o.stacked && k ? cum[k - 1][i] : 0) + (+v || 0)); });
+    if (o.stacked) top = Math.max(...cum[S.length - 1]); else S.forEach(s => s.v.forEach(v => { if (+v > top) top = +v; }));
+    if (o.ref && o.ref.v > top) top = o.ref.v;
+    const ymax = o.max || niceMax(top * 1.05 || 1);
+    const t0 = t[0], t1 = t[n - 1], span = Math.max(1, t1 - t0);
+    const X = i => L + (t[i] - t0) / span * (W - L - R), Y = v => T + (1 - Math.min(v, ymax) / ymax) * (H - T - B);
+    this.X = X; this.Y = Y; this.cum = cum;
+    const dts = []; for (let i = 1; i < n; i++) dts.push(t[i] - t[i - 1]); dts.sort((a, b) => a - b);
+    const gap = Math.max(25, (dts[Math.floor(dts.length / 2)] || 10) * 3.5);
+    const segs = []; let s0 = 0; for (let i = 1; i < n; i++) if (t[i] - t[i - 1] > gap) { segs.push([s0, i - 1]); s0 = i; } segs.push([s0, n - 1]);
+    let h = '';
+    // сетка
+    for (let k = 0; k <= 4; k++) {
+      const v = ymax * k / 4, y = Y(v);
+      h += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="${k ? 'var(--grid)' : 'var(--axis)'}" stroke-width="1"/>`;
+      h += `<text class="tick" x="${L - 6}" y="${y + 3.5}" text-anchor="end">${esc((o.fmt || axisFmt)(v))}</text>`;
+    }
+    const st = timeStep(span), first = Math.ceil(t0 / st) * st;
+    for (let x = first; x <= t1; x += st) {
+      const px = L + (x - t0) / span * (W - L - R); if (px < L + 14 || px > W - R - 14) continue;
+      h += `<text class="tick" x="${px}" y="${H - 5}" text-anchor="middle">${hhmm(x)}</text>`;
+    }
+    // ряды
+    S.forEach((s, k) => {
+      let d = '';
+      for (const [a, b] of segs) {
+        if (o.stacked) {
+          let p = ''; for (let i = a; i <= b; i++) p += (i === a ? 'M' : 'L') + X(i).toFixed(1) + ',' + Y(cum[k][i]).toFixed(1);
+          for (let i = b; i >= a; i--) p += 'L' + X(i).toFixed(1) + ',' + Y(k ? cum[k - 1][i] : 0).toFixed(1);
+          d += p + 'Z';
+        } else { for (let i = a; i <= b; i++) d += (i === a ? 'M' : 'L') + X(i).toFixed(1) + ',' + Y(+s.v[i] || 0).toFixed(1); }
+      }
+      if (o.stacked) {
+        h += `<path d="${d}" fill="${s.color}" stroke="none"/>`;
+        let ln = ''; for (const [a, b] of segs) for (let i = a; i <= b; i++) ln += (i === a ? 'M' : 'L') + X(i).toFixed(1) + ',' + Y(cum[k][i]).toFixed(1);
+        h += `<path d="${ln}" fill="none" stroke="var(--surface)" stroke-width="1.5"/>`;
+      } else h += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    });
+    if (o.ref) { const y = Y(o.ref.v); h += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--muted)" stroke-dasharray="4 4"/><text class="tick" x="${W - R}" y="${y - 4}" text-anchor="end">${esc(o.ref.label)}</text>`; }
+    h += `<g class="hv"></g><rect x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent"/>`;
+    svg.innerHTML = h;
+    this.hover();
+  }
+  hover() {
+    const g = $('.hv', this.svg); if (!g || !this.X) return;
+    if (this.hx == null || this.t.length < 2) { g.innerHTML = ''; this.tip.style.display = 'none'; return; }
+    const { W, H, L, R, T, B } = this.geo, t = this.t, n = t.length, S = this.s, o = this.opt;
+    let bi = 0, bd = 1e9; for (let i = 0; i < n; i++) { const d = Math.abs(this.X(i) - this.hx); if (d < bd) { bd = d; bi = i; } }
+    const x = this.X(bi);
+    let h = `<line x1="${x}" x2="${x}" y1="${T}" y2="${H - B}" stroke="var(--axis)" stroke-width="1"/>`;
+    S.forEach((s, k) => { const v = o.stacked ? this.cum[k][bi] : +s.v[bi]; h += `<circle cx="${x}" cy="${this.Y(v || 0)}" r="4" fill="${s.color}" stroke="var(--surface)" stroke-width="2"/>`; });
+    g.innerHTML = h;
+    const fmt = o.tipFmt || o.fmt || f1;
+    let tip = `<div class="tt">${hhmmss(t[bi])}</div>`;
+    const rows = S.map(s => ({ s, v: +s.v[bi] })); if (o.stacked) rows.reverse();
+    for (const { s, v } of rows) tip += `<div class="row"><i style="background:${s.color}"></i>${esc(s.name)}<span class="v">${esc(fmt(v))}</span></div>`;
+    if (o.stacked && o.totalLabel) tip += `<div class="row" style="border-top:1px solid var(--grid);margin-top:3px;padding-top:3px">${esc(o.totalLabel)}<span class="v">${esc(fmt(this.cum[S.length - 1][bi]))}</span></div>`;
+    if (o.extra) tip += o.extra(bi);
+    this.tip.innerHTML = tip; this.tip.style.display = 'block';
+    const tw = this.tip.offsetWidth, top = this.svg.offsetTop + 4;
+    let left = x + 14; if (left + tw > W) left = x - tw - 14; if (left < 0) left = 0;
+    this.tip.style.left = left + 'px'; this.tip.style.top = top + 'px';
+  }
+}
+// мини-график с вертикальной шкалой 0 · 50 · 100 % слева и сеткой. Внутри SVG растягивается
+// (preserveAspectRatio="none"), поэтому подписи шкалы — HTML рядом, а линии сетки не утолщаются (non-scaling-stroke).
+function spark(vals, color, max) {
+  const v = (vals || []).map(Number).filter(x => !isNaN(x));
+  const m = max || Math.max(...v, 0) * 1.1 || 1, Y = x => (36 - Math.min(x, m) / m * 34);   // 0 → y=36, max → y=2
+  const lbl = x => max === 100 ? `${x}%` : axisFmt(x);
+  const grid = [0, 0.5, 1].map(f => `<line x1="0" x2="100" y1="${Y(m * f)}" y2="${Y(m * f)}" stroke="${f ? 'var(--grid)' : 'var(--axis)'}" stroke-width="1" vector-effect="non-scaling-stroke"/>`).join('');
+  let plot = '';
+  if (v.length >= 2) {
+    const pts = v.map((x, i) => `${(i / (v.length - 1) * 100).toFixed(2)},${Y(x).toFixed(2)}`);
+    plot = `<path d="M${pts.join('L')}L100,36L0,36Z" fill="${color}" opacity=".16"/><path d="M${pts.join('L')}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`;
+  }
+  const axis = [1, 0.5, 0].map(f => `<span style="top:${(Y(m * f) / 38 * 100).toFixed(1)}%">${lbl(f === 0 ? 0 : +(m * f).toFixed(1))}</span>`).join('');
+  return `<div class="spk"><div class="spk-y">${axis}</div><svg viewBox="0 0 100 38" preserveAspectRatio="none">${grid}${plot}</svg></div>`;
+}
+
+// ---------- сортируемая таблица ----------
+function sortRows(rows, key, asc) {
+  return rows.slice().sort((a, b) => { const x = a[key], y = b[key]; const c = (typeof x === 'string' || typeof y === 'string') ? String(x).localeCompare(String(y), 'ru') : (x || 0) - (y || 0); return asc ? c : -c; });
+}
+function thead(cols, sort) {
+  return '<tr>' + cols.map(c => `<th class="${c.n ? 'n ' : ''}${c.k ? 'sort ' : ''}${c.cls || ''}${sort.k === c.k ? ' on' + (sort.asc ? ' asc' : '') : ''}" data-k="${c.k || ''}" title="${esc(c.title || '')}">${esc(c.label)}</th>`).join('') + '</tr>';
+}
+function bindSort(table, sort, rerender) {
+  table.querySelectorAll('th.sort').forEach(th => th.onclick = () => {
+    const k = th.dataset.k; if (sort.k === k) sort.asc = !sort.asc; else { sort.k = k; sort.asc = (k === 'name' || k === 'router'); } rerender();
+  });
+}
+const cpuCell = v => `<span class="cpubar"><i style="width:${Math.min(100, v || 0)}%"></i></span>${pct(v)}`;
+
+// ---------- маршрутизация и обновление ----------
+let view = null, timer = null, paused = false, gen = 0;
+function route() {
+  const h = location.hash.replace(/^#\/?/, '').split('/');
+  if (h[0] === 'r' && h[1]) return h[2] === 'p' && h[3] ? { v: 'proc', ip: h[1], pid: h[3], st: h[4] || '' } : h[2] === 't' ? { v: 'traffic', ip: h[1] } : h[2] === 'c' ? { v: 'clients', ip: h[1] } : { v: 'host', ip: h[1] };
+  return { v: 'overview' };
+}
+function crumbs(parts) {
+  // корень — само название «Мониторинг роутера» (ссылка на главную), дальше роутер › процесс
+  $('#crumbs').innerHTML = parts.map((p, i) => '<span class="sep">›</span>' + (p.href && i < parts.length - 1 ? `<a href="${p.href}">${esc(p.label)}</a>` : `<b>${esc(p.label)}</b>`)).join('');
+}
+// справка «?» в шапке: что на этой странице (наведение — показать, щелчок — закрепить)
+function setHelp(html) { $('#help-tip').innerHTML = html; }
+$('#help .qbtn').onclick = e => { e.stopPropagation(); $('#help').classList.toggle('open'); };
+$('#help-tip').onclick = e => e.stopPropagation();
+document.addEventListener('click', () => $('#help').classList.remove('open'));
+function setUpd(ok, text) { $('#upd').innerHTML = `<span class="dot ${ok ? '' : 'stale'}"></span>${esc(text)}`; }
+async function tick() {
+  clearTimeout(timer); const my = gen;
+  try { await view.refresh(); if (my === gen) setUpd(true, 'обновлено ' + hhmmss(Date.now() / 1000)); }
+  catch (e) { if (my === gen) setUpd(false, 'ошибка: ' + e.message); }
+  if (my === gen && !paused && !view.stop) timer = setTimeout(tick, REFRESH);
+}
+function go() {
+  gen++; clearTimeout(timer);
+  const r = route(), m = $('#main'); m.innerHTML = '';
+  view = r.v === 'host' ? new HostView(m, r) : r.v === 'traffic' ? new TrafficView(m, r) : r.v === 'clients' ? new ClientsView(m, r) : r.v === 'proc' ? new ProcView(m, r) : new Overview(m);
+  window.scrollTo(0, 0); setUpd(false, 'загрузка…'); tick();
+}
+window.addEventListener('hashchange', go);
+// «Добавить роутер» — в шапке, доступна с любой страницы; после добавления список роутеров перечитывается
+// выпадающий список: роутеры, убранные с главной корзиной (щелчок — вернуть); найденные в сети роутеры OpenWrt без
+// RouterMon (щелчок — мастер установки); последним — ввод IP нового роутера
+const afterAdd = () => { peersCache = null; if (route().v === 'overview') tick(); else location.hash = '#/'; };
+// пример адреса для подсказки — из подсети роутера, с которого открыта страница
+const ipExample = () => { const s = (lanInfo.self || location.hostname || '').split('.'); return s.length === 4 && /^\d+$/.test(s[3]) ? `${s[0]}.${s[1]}.${s[2]}.${+s[3] === 2 ? 3 : 2}` : '192.168.1.2'; };
+let scanList = null;
+function addMenu(open) {
+  const dd = $('#add-dd'), m = $('#add-menu');
+  if (!open) { dd.classList.remove('open'); $('#add').setAttribute('aria-expanded', 'false'); return; }
+  const draw = (loading) => {
+    m.innerHTML = `<div class="dh">Убранные с главной</div>` +
+      (loading ? `<div class="de">загрузка…</div>` : hiddenList.length
+        ? hiddenList.map(h => `<button type="button" class="di" data-unhide="${esc(h.ip)}" title="Вернуть на главную"><span>${esc(h.name || h.ip)}</span><span class="ip">${esc(h.ip)}</span></button>`).join('')
+        : `<div class="de">нет — роутеры убираются корзиной на карточке</div>`) +
+      `<hr><div class="dh">Найдены в сети, без RouterMon</div>` +
+      (scanList == null ? `<div class="de">поиск роутеров OpenWrt…</div>` : scanList.length
+        ? scanList.map(s => `<button type="button" class="di" data-scan="${esc(s.ip)}" title="Установить RouterMon — откроется мастер"><span>OpenWrt</span><span class="ip">${esc(s.ip)}</span></button>`).join('')
+        : `<div class="de">не найдено</div>`) +
+      `<hr><div class="dh">Новый роутер по IP</div>
+      <div class="dip"><input type="text" id="add-ip" inputmode="decimal" placeholder="например ${esc(ipExample())}" aria-label="IP-адрес роутера"><button type="button" class="btn" id="add-go">Проверить</button></div>`;
+    const ipEl = $('#add-ip', m), goIp = () => { const ip = ipEl.value.trim(); addMenu(false); addRouterWizard(afterAdd, ip); };
+    $('#add-go', m).onclick = goIp; ipEl.onkeydown = e => { if (e.key === 'Enter') goIp(); if (e.key === 'Escape') addMenu(false); };
+    m.querySelectorAll('[data-scan]').forEach(b => b.onclick = () => { addMenu(false); addRouterWizard(afterAdd, b.dataset.scan); });
+    m.querySelectorAll('[data-unhide]').forEach(b => b.onclick = async () => {
+      b.disabled = true; b.style.opacity = '.5';
+      try { await post('a=unhide', { ip: b.dataset.unhide }); addMenu(false); afterAdd(); }
+      catch (e) { b.disabled = false; b.style.opacity = ''; alert('Не удалось: ' + e.message); }
+    });
+  };
+  const redraw = () => { if (dd.classList.contains('open')) { const v = ($('#add-ip', m) || {}).value || ''; draw(false); $('#add-ip', m).value = v; } };
+  dd.classList.add('open'); $('#add').setAttribute('aria-expanded', 'true');
+  scanList = null; draw(true);
+  peers(true).then(redraw);
+  api('', 'a=scan').then(j => { scanList = j.found || []; redraw(); }).catch(() => { scanList = []; redraw(); });
+  setTimeout(() => { const i = $('#add-ip', m); if (i) i.focus(); }, 0);
+}
+$('#add').onclick = e => { e.stopPropagation(); addMenu(!$('#add-dd').classList.contains('open')); };
+$('#add-menu').onclick = e => e.stopPropagation();
+document.addEventListener('click', () => addMenu(false));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') addMenu(false); });
+$('#pause').onclick =() => { paused = !paused; $('#pause').setAttribute('aria-pressed', paused); $('#pause').textContent = paused ? 'Продолжить' : 'Пауза'; if (!paused) tick(); else clearTimeout(timer); };
+(function theme() {
+  const apply = v => { if (v) document.documentElement.setAttribute('data-theme', v); else document.documentElement.removeAttribute('data-theme'); };
+  apply(lsGet('rmon.theme', null));
+  $('#theme').onclick = () => {
+    const dark = matchMedia('(prefers-color-scheme: dark)').matches, curDark = (document.documentElement.getAttribute('data-theme') || (dark ? 'dark' : 'light')) === 'dark';
+    const v = curDark ? 'light' : 'dark'; lsSet('rmon.theme', v); apply(v);
+  };
+})();
+const trafficHref = ip => `#/r/${ip}/t`, clientsHref = ip => `#/r/${ip}/c`;
+const hostTabs = (ip, on) => `<nav class="tabs">${[['o', hostHref(ip), 'Обзор'], ['t', trafficHref(ip), 'Трафик'], ['c', clientsHref(ip), 'Клиенты']]
+  .map(([k, h, l]) => `<a href="${h}"${on === k ? ' class="on" aria-current="page"' : ''}>${l}</a>`).join('')}</nav>`;
+// цвета рядов по порядку; седьмого цвета нет — больше шести рядов на графике не выводится
+const SER = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)', 'var(--s7)'];
+// диапазон Wi-Fi по частоте, МГц
+const band = f => { f = +f; return f >= 5925 ? '6 ГГц' : f >= 4900 ? '5 ГГц' : f >= 2400 ? '2,4 ГГц' : ''; };
+// ---------- топ адресов: со всех роутеров (данные есть у того, через который идёт интернет), сводится по домену ----------
+// only — роутер, чья страница открыта: в топе остаются только его клиенты (и его собственный трафик)
+async function loadTop(range, only) {
+  const list = await peers();
+  const clP = only ? api(only, 'a=clients').catch(() => null) : Promise.resolve(null);
+  const rs = await Promise.all(list.map(ip => api(ip, 'a=top&m=' + (range || 'all')).then(j => ({ ip, j })).catch(e => ({ ip, e }))));
+  const T = mergeTop(rs);
+  return only ? forRouter(T, await clP, only, list) : T;
+}
+// оставить только трафик клиентов роутера ip: Wi-Fi-станции его точек доступа и проводные устройства его портов.
+// Проводной порт, за которым виден другой роутер, — магистраль (через него идут чужие клиенты), он не учитывается.
+function forRouter(T, cl, ip, routers) {
+  const rmac = new Set(routers.map(r => r === ip ? '' : ((T.devs[r] || {}).m || T.selfm[r] || '')).filter(Boolean));
+  const macs = new Set();
+  if (cl) {
+    for (const ms of Object.values(cl.wifi || {})) ms.forEach(m => macs.add(m));
+    for (const ms of Object.values(cl.wired || {})) if (!ms.some(m => rmac.has(m))) ms.forEach(m => macs.add(m));
+  }
+  const keep = c => c === '@' + ip || macs.has((T.devs[c] || {}).m);
+  const rows = [];
+  for (const r of T.rows) {
+    const c = {}; let u = 0, d = 0;
+    for (const [k, v] of Object.entries(r.c)) if (keep(k)) { c[k] = v; u += v[0]; d += v[1]; }
+    if (u + d > 0) rows.push({ ...r, c, u, d });
+  }
+  rows.sort((a, b) => b.u + b.d - a.u - a.d);
+  const name = T.rnames[ip] || (cl && cl.name) || ip;
+  return { ...T, rows, cl, macs, only: { ip, name, n: macs.size, ok: !!cl },
+    empty: !cl ? `Не удалось получить список клиентов ${name}` : !macs.size && !rows.length ? `У ${name} сейчас нет подключённых клиентов` : T.src.length ? `Клиенты ${name} за этот период с интернетом не обменивались` : T.empty };
+}
+function mergeTop(rs) {
+  const by = new Map(), devs = {}, selfm = {}, rnames = {}, src = []; let since = 0, dns = false;
+  for (const { j } of rs) {
+    if (!j) continue; rnames[j.ip] = j.name; selfm[j.ip] = (j.self || {}).m || ''; if (j.dns) dns = true;
+    for (const [ip, d] of Object.entries(j.devs || {})) if (!devs[ip] || (!devs[ip].n && d.n)) devs[ip] = d;
+    if (j.rows.length) { src.push(j.name); if (j.since && (!since || j.since < since)) since = j.since; }
+    for (const x of j.rows) {
+      let o = by.get(x.h); if (!o) by.set(x.h, o = { h: x.h, ip: x.ip, n: 0, u: 0, d: 0, c: {} });
+      o.u += x.u; o.d += x.d; o.n = Math.max(o.n, x.n);
+      for (const [c, v] of Object.entries(x.c)) { const k = c === '@' ? '@' + j.ip : c, p = o.c[k] || (o.c[k] = [0, 0]); p[0] += v[0]; p[1] += v[1]; }
+    }
+  }
+  return { rows: [...by.values()].sort((a, b) => b.u + b.d - a.u - a.d), devs, selfm, rnames, since, dns, src,
+    empty: src.length ? 'За этот период обмена с интернетом не было' : 'Данных пока нет: сбор начинается после установки, первые цифры — через минуту' };
+}
+// сайт = основной домен: rr4---sn-abc.googlevideo.com → googlevideo.com, news.bbc.co.uk → bbc.co.uk; IP — как есть
+function baseDom(h) {
+  if (/^[0-9.]+$/.test(h) || h.includes(':')) return h;
+  const p = h.replace(/\.$/, '').split('.'); if (p.length <= 2) return p.join('.');
+  const n = p[p.length - 1].length === 2 && /^(com|net|org|co|gov|edu|ac|msk|spb|ne|or|go)$/.test(p[p.length - 2]) ? 3 : 2;
+  return p.slice(-n).join('.');
+}
+function groupTop(rows, bySite) {
+  if (!bySite) return rows.map(r => ({ ...r, hosts: [r] })).sort((a, b) => b.u + b.d - a.u - a.d);
+  const m = new Map();
+  for (const r of rows) {
+    const k = baseDom(r.h); let o = m.get(k); if (!o) m.set(k, o = { h: k, u: 0, d: 0, c: {}, hosts: [] });
+    o.u += r.u; o.d += r.d; o.hosts.push(r);
+    for (const [c, v] of Object.entries(r.c)) { const p = o.c[c] || (o.c[c] = [0, 0]); p[0] += v[0]; p[1] += v[1]; }
+  }
+  return [...m.values()].sort((a, b) => b.u + b.d - a.u - a.d);
+}
+// устройство: имя — из статических хостов /etc/config/dhcp (незнакомому — пусто), IP, MAC
+function devInfo(c, T) {
+  if (c[0] === '@') { const ip = c.slice(1); return { n: T.rnames[ip] || ip, ip, m: T.selfm[ip] || '' }; }
+  const d = T.devs[c] || {}; return { n: d.n || '', ip: c, m: d.m || '' };
+}
+// «Хостнейм | IP | MAC»; незнакомое устройство — без имени
+const devFull = (c, T) => { const d = devInfo(c, T); return [d.n, d.ip, d.m].filter(Boolean).join(' | '); };
+// коротко (в списках): имя, а у незнакомого — IP
+const devName = (c, T) => { const d = devInfo(c, T); return d.n || d.ip; };
+// подсказка к списку устройств: все, «Хостнейм | IP | MAC — объём»
+const devTip = (c, T) => Object.entries(c).sort((a, b) => b[1][0] + b[1][1] - a[1][0] - a[1][1]).map(([k, v]) => `${devFull(k, T)} — ${bytes(v[0] + v[1])}`).join('\n');
+// главное устройство полностью «Хостнейм | IP | MAC», остальные — «+N» (все — в подсказке)
+function devTop(c, T) {
+  const e = Object.entries(c).sort((a, b) => b[1][0] + b[1][1] - a[1][0] - a[1][1]);
+  return e.length ? devFull(e[0][0], T) + (e.length > 1 ? `  +${e.length - 1}` : '') : '';
+}
+function devList(c, T) {
+  const e = Object.entries(c).sort((a, b) => b[1][0] + b[1][1] - a[1][0] - a[1][1]);
+  return e.slice(0, 2).map(([k]) => devName(k, T)).join(', ') + (e.length > 2 ? ` +${e.length - 2}` : '');
+}
+function topSub(T, range) {
+  let s = `за ${rangeFor(range)}, ` + (T.only ? `клиенты ${T.only.name} (${T.only.n} ${plural(T.only.n, 'устройство', 'устройства', 'устройств')} сейчас)` : 'все роутеры');
+  if (T.since && T.since > Date.now() / 1000 - (range || 1440) * 60 + 300) s += ` · данные с ${hhmm(T.since)}`;
+  if (T.src.length && !T.dns) s += ' · без доменов: журнал DNS выключен';
+  return s;
+}
+const hostHref = ip => `#/r/${ip}`, procHref = (ip, pid, st) => `#/r/${ip}/p/${pid}${st ? '/' + st : ''}`;
+
+// раскладка карточек: до 3 роутеров — все в один ряд, больше 3 — по два в ряд; на узком экране 2 или 1.
+// Карточка неполного последнего ряда растягивается на весь ряд.
+// Если панель «Самые нагруженные процессы в сети» свёрнута, карточки растягиваются до низа экрана:
+// лишняя высота уходит в мини-графики CPU и памяти (третий ряд каждой карточки — 1fr).
+function layoutCards(box) {
+  if (!box) return;
+  const cards = [...box.children].filter(c => c.classList.contains('card')); if (!cards.length) return;
+  const w = window.innerWidth, n = cards.length;
+  let cols = n <= 3 ? n : 2;
+  if (w <= 720) cols = 1; else if (w <= 1200) cols = Math.min(cols, 2);   // уже ~370 px карточка не вмещает 6 циферблатов в ряд
+  const full = Math.floor(n / cols) * cols, rest = n - full, rows = Math.ceil(n / cols);
+  cards.forEach((c, i) => { c.style.gridColumn = `span ${i < full ? 6 / cols : 6 / rest}`; });
+  cards.forEach(c => { const w = c.getBoundingClientRect().width; c.classList.toggle('narrow', w < 560); c.classList.toggle('g3', w < 500); });
+  box.style.gridTemplateRows = Array(rows).fill('auto auto minmax(38px, 1fr) auto auto auto').join(' ');
+  const fold = document.getElementById('nettop-p');
+  if (fold && !fold.classList.contains('open') && w > 720) {
+    const top = box.getBoundingClientRect().top + window.scrollY;
+    const below = fold.offsetHeight + 12 + 16;   // свёрнутая панель + её отступ + нижний отступ страницы
+    box.style.minHeight = Math.max(0, window.innerHeight - top - below) + 'px';
+  } else box.style.minHeight = '';
+}
+window.addEventListener('resize', () => { const b = document.getElementById('cards'); if (b) layoutCards(b); });
+
+// ================= Обзор сети =================
+class Overview {
+  constructor(m) {
+    this.m = m; this.data = {}; this.sort = { k: 'cpu', asc: false };
+    crumbs([]);
+    setHelp('<div><b>Роутеры в сети</b></div><div>Поиск роутеров…</div>');
+    m.innerHTML = `<div class="grid g-cards" id="cards"></div>
+      <div class="section panel fold${lsGet('rmon.nettop', false) ? ' open' : ''}" id="nettop-p"><div class="panel-h fold-h" id="nettop-h" role="button" tabindex="0" aria-expanded="${lsGet('rmon.nettop', false)}"><h2><span class="chev">▸</span> Самые нагруженные процессы в сети</h2><span class="muted" style="font-size:12px" id="nettop-sub"></span></div>
+      <div class="fold-b tbl-wrap"><table id="nettop"></table></div></div>`;
+    // свёрнута — освободившееся место отдаётся карточкам роутеров (layoutCards растягивает их по высоте экрана)
+    const fp = $('#nettop-p', m), fh = $('#nettop-h', m);
+    const toggle = () => { const o = !fp.classList.contains('open'); fp.classList.toggle('open', o); fh.setAttribute('aria-expanded', o); lsSet('rmon.nettop', o); layoutCards($('#cards', m)); };
+    fh.onclick = toggle; fh.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } };
+    this.mini = {};
+  }
+  async refresh() {
+    const list = await peers(); this.list = list;
+    setHelp(`<div><b>Роутеры в сети</b></div><div>${list.length} ${list.length === 1 ? 'роутер' : list.length < 5 ? 'роутера' : 'роутеров'} с RouterMon · данные каждые 10 с.</div><div>Нажмите на роутер или процесс, чтобы открыть подробности; на циферблат — процессы роутера с нужной сортировкой.</div>`);
+    const res = await Promise.all(list.map(ip => api(ip, 'a=sum').then(j => ({ ip, j })).catch(e => ({ ip, e }))));
+    res.forEach(r => this.data[r.ip] = r);
+    this.render();
+    if (res.every(r => r.e)) throw new Error('ни один роутер не ответил');
+  }
+  render() {
+    const cards = $('#cards', this.m);
+    cards.innerHTML = this.list.map(ip => this.card(this.data[ip])).join('');
+    layoutCards(cards);
+    cards.querySelectorAll('.card').forEach(c => c.onclick = e => { if (e.target.closest('a,button') || c.dataset.down) return; location.hash = hostHref(c.dataset.ip); });
+    bindGaugeTips(cards);
+    cards.querySelectorAll('th[data-mini]').forEach(th => th.onclick = e => {
+      e.stopPropagation(); const [ip, slot, key] = th.dataset.mini.split('|');
+      (this.mini[ip] || (this.mini[ip] = { a: 'cpu', b: 'rss' }))[slot] = key; this.render();
+    });
+    cards.querySelectorAll('.gauge[data-go]').forEach(g => {
+      const go = e => { if (e) e.stopPropagation(); pendingGo = { ip: g.dataset.ip, go: JSON.parse(g.dataset.go) }; location.hash = hostHref(g.dataset.ip); };
+      g.onclick = go; g.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(e); } };
+    });
+    // корзина: карточка сразу пропадает с главной; вернуть — из списка «+ Добавить роутер»
+    cards.querySelectorAll('[data-forget]').forEach(b => b.onclick = async e => {
+      e.stopPropagation();
+      const ip = b.dataset.forget, r = this.data[ip], name = (r && r.j && r.j.name) || ip;
+      const card = b.closest('.card'); if (card) card.style.opacity = '.35';
+      try { await post('a=forget', { ip, name }); delete this.data[ip]; this.list = this.list.filter(x => x !== ip); peersCache = null; tick(); }
+      catch (e) { if (card) card.style.opacity = ''; alert('Не удалось: ' + e.message); }
+    });
+    this.renderTop();
+  }
+  card(r) {
+    if (!r) return '';
+    // недоступный роутер: те же 6 блоков, что у обычной карточки (subgrid), чтобы ряд не съезжал
+    if (r.e) return `<div class="panel card" data-ip="${r.ip}" data-down="1"><div class="card-h"><div class="t"><div class="name">${esc(r.ip)}</div><div class="sub">не отвечает</div></div><div class="badges">${badge('critical', 'Нет связи', r.e.message)}</div></div>
+      <div class="muted">${esc(r.e.message)}. Роутер выключен, сменил адрес или RouterMon на нём не установлен.</div><div></div><div></div><div></div>
+      <div class="foot">${trashBtn(r.ip, r.ip)}<span></span></div></div>`;
+    const j = r.j, c = curOf(j), H = j.hist || {};
+    const memUsed = (H.t || []).map((_, i) => { const tot = H.anon[i] + H.kern[i] + H.cache[i] + H.shm[i] + H.free[i]; return tot ? (tot - H.avail[i]) / tot * 100 : 0; });
+    const cpuH = (H.t || []).map((_, i) => H.user[i] + H.sys[i] + H.irq[i] + H.io[i]);
+    const wan = j.net && j.net[j.wan], wrx = wan ? last(wan.rx) : null, wtx = wan ? last(wan.tx) : null;
+    const netMax = niceMax(Math.max(1, ...(wan ? wan.rx.concat(wan.tx) : [])) * 1.1), swT = (j.swapTotal || 0) / 1024;
+    const top = (j.top || []).filter(p => !p.gone);
+    // два мини-топа по 5; щелчок по заголовку CPU или RSS перестраивает топ по этому столбцу
+    const ms = this.mini[j.ip] || (this.mini[j.ip] = { a: 'cpu', b: 'rss' });
+    const miniTop = slot => {
+      const k = ms[slot], rows = sortRows(top, k, false).slice(0, 5);
+      const th = (key, label) => `<th class="n sort${k === key ? ' on' : ''}" data-mini="${esc(j.ip)}|${slot}|${key}" title="Топ по ${key === 'cpu' ? 'CPU' : 'RAM'}">${label}</th>`;
+      return `<table class="mini-top"><tr><th>Топ по ${k === 'cpu' ? 'CPU' : 'RAM'}</th>${th('cpu', 'CPU')}${th('rss', 'RSS')}</tr>${rows.map(prow).join('')}</table>`;
+    };
+    const prow = p => `<tr class="click" onclick="location.hash='${procHref(j.ip, p.pid, p.st)}'"><td><span class="pname">${esc(p.name)}</span></td><td class="n">${pct(p.cpu)}</td><td class="n">${kb(p.rss)}</td></tr>`;
+    // диски: подключённые к роутеру; если их нет — флеш-память прошивки, чтобы строка была у всех карточек
+    let disks = (j.disks || []).filter(d => d.mp !== '/');
+    if (!disks.length) disks = (j.disks || []).filter(d => d.mp === '/').map(d => ({ ...d, mp: 'flash /' }));
+    return `<div class="panel card" data-ip="${j.ip}">
+      <div class="card-h"><div class="t"><div class="name">${esc(j.name || j.ip)}</div><div class="sub" title="${esc(j.ip)} · ${esc(j.model)} · ${esc(j.fw)} · работает ${dur(j.uptime)}">${esc(j.ip)} · ${esc(j.model)} · работает ${dur(j.uptime)}</div></div>
+        <div class="badges">${health(j).map(h => badge(...h)).join('')}</div></div>
+      <div class="gauges sm">${
+        gauge({ ip: j.ip, key: 'cpu', label: 'CPU', value: c.cpu, max: 100, unit: '%', th: TH.cpu, title: 'Загрузка всех ядер за последние 10 с.',
+          sub: `${j.ncpu} ядра, load ${f1(c.load)}.`, sub2: `Процессы ${pct(c.user)}, ядро ${pct(c.sys)}, прерывания ${pct(c.irq)}.`, go: { sort: 'cpu', kern: true }, goText: 'процессы роутера по загрузке CPU' }) +
+        gauge({ ip: j.ip, key: 'mem', label: 'RAM', value: c.usedPct, max: 100, unit: '%', th: TH.mem, title: 'Занятая память: всего − доступно приложениям.',
+          sub: `Доступно ${mb(c.avail)} из ${mb(c.total)}.`, sub2: `Процессам ${mb(c.anon)}, ядру ${mb(c.kern)}.`, go: { sort: 'rss' }, goText: 'процессы роутера по занятой памяти' }) +
+        // одинаковый набор циферблатов у всех роутеров: чего нет (swap, датчик), показывается серым «n/a»
+        (swT > 0 ? gauge({ ip: j.ip, key: 'swap', label: 'Swap', value: c.swap / swT * 100, max: 100, th: TH.swap, text: mb(c.swap), title: 'Сжатая память в ОЗУ (zram).',
+          sub: `Занято ${mb(c.swap)} из ${mb(swT)} (${pct(c.swap / swT * 100)}).`, go: { sort: 'swap' }, goText: 'процессы роутера по объёму в swap' })
+          : gauge({ ip: j.ip, key: 'swap', label: 'Swap', value: NaN, th: TH.swap, text: 'n/a', title: 'Swap на этом роутере не настроен.' })) +
+        gauge({ ip: j.ip, key: 'temp', label: 't° CPU', value: c.temp, max: 110, unit: '°C', th: TH.temp, title: 'Температура процессора.',
+          go: { chart: 'c-temp' }, goText: 'график температуры роутера' }) +
+        (c.wtemp ? gauge({ ip: j.ip, key: 'wtemp', label: 't° Wi-Fi', value: c.wtemp, max: 110, unit: '°C', th: TH.temp, title: wArcs(j).length > 1 ? 'Датчики температуры модулей Wi-Fi.' : 'Датчик температуры Wi-Fi.', sub: wTip(j), arcs: wArcs(j),
+          go: { chart: 'c-temp' }, goText: 'график температуры роутера' })
+          : gauge({ ip: j.ip, key: 'wtemp', label: 't° Wi-Fi', value: NaN, th: TH.temp, text: 'n/a', title: 'На этом роутере нет датчика температуры Wi-Fi.' })) +
+        gauge({ ip: j.ip, key: 'net', label: 'Net', value: wrx, max: netMax, neutral: true, text: mbit(wrx), title: `Приём по интерфейсу маршрута по умолчанию (${j.wan || '—'}): интернет или аплинк mesh.`,
+          sub: `Передача: ${mbit(wtx)}.`, sub2: `Шкала до ${mbit(netMax)} (по пику за последние минуты).` })
+      }</div>
+      <div class="sparks grow">
+        <div class="spark"><div class="l"><span>CPU за час</span><span class="num">макс ${pct(Math.max(0, ...cpuH))}</span></div>${spark(cpuH, 'var(--s1)', 100)}</div>
+        <div class="spark"><div class="l"><span>RAM за час</span><span class="num">макс ${pct(Math.max(0, ...memUsed))}</span></div>${spark(memUsed, 'var(--s2)', 100)}</div>
+      </div>
+      ${disks.length ? '' : '<div></div>'}${disks.length ? `<div>${disks.map(d => `<div class="disk"><span class="mono">${esc(d.mp)}</span><span class="num ink2">${bytesK(d.used)} из ${bytesK(d.total)}</span><div class="meter"><i style="width:${(d.used / d.total * 100).toFixed(1)}%;background:${d.used / d.total > .9 ? 'var(--serious)' : 'var(--s1)'}"></i></div></div>`).join('')}</div>` : ''}
+      <div class="sparks">
+        ${miniTop('a')}
+        ${miniTop('b')}
+      </div>
+      <div class="foot"><span>${trashBtn(j.ip, j.name || j.ip)}</span><a href="${hostHref(j.ip)}">Все графики и процессы →</a></div>
+    </div>`;
+  }
+  renderTop() {
+    // с каждого роутера — 5 первых по выбранной сортировке (по умолчанию по CPU)
+    const PER = 5, rows = [];
+    const k = (this.sort.k === 'router' || this.sort.k === 'name') ? 'cpu' : this.sort.k;
+    for (const ip of this.list) {
+      const r = this.data[ip]; if (!r || r.e) continue;
+      for (const p of sortRows((r.j.top || []).filter(p => !p.gone), k, false).slice(0, PER)) rows.push({ ...p, router: r.j.name, ip });
+    }
+    const nm = { cpu: 'CPU', rss: 'памяти', pid: 'PID', thr: 'потокам' }[k] || 'CPU';
+    $('#nettop-sub', this.m).textContent = `по ${PER} самых нагруженных с каждого роутера (по ${nm}); CPU за последние 10 с`;
+    const cols = [{ k: 'router', label: 'Роутер' }, { k: 'name', label: 'Процесс' }, { k: 'pid', label: 'PID', n: 1, cls: 'hide-sm' }, { k: 'cpu', label: 'CPU', n: 1, title: '% всей мощности роутера за последние 10 с' }, { k: 'rss', label: 'Память (RSS)', n: 1 }, { k: 'thr', label: 'Потоки', n: 1, cls: 'hide-sm' }];
+    const t = $('#nettop', this.m);
+    const sorted = sortRows(rows, this.sort.k, this.sort.asc);
+    t.innerHTML = thead(cols, this.sort) + sorted.map(p => `<tr class="click" data-h="${procHref(p.ip, p.pid, p.st)}"><td>${esc(p.router)}</td><td><span class="pname">${esc(p.name)}</span><span class="pcmd mono">${esc(p.cmd)}</span></td><td class="n hide-sm">${p.pid}</td><td class="n">${cpuCell(p.cpu)}</td><td class="n">${kb(p.rss)}</td><td class="n hide-sm">${p.thr}</td></tr>`).join('');
+    t.querySelectorAll('tr[data-h]').forEach(tr => tr.onclick = () => location.hash = tr.dataset.h);
+    bindSort(t, this.sort, () => this.renderTop());
+  }
+}
+
+// ================= Роутер =================
+class HostView {
+  constructor(m, r) {
+    this.m = m; this.ip = r.ip;
+    this.range = +lsGet('rmon.rangeMin', 60); if (!RANGES.includes(this.range)) this.range = 60;   // 0 = «Всё»
+    this.sort = lsGet('rmon.psort', { k: 'cpu', asc: false }); this.f = lsGet('rmon.pfilt', { q: '', kern: false, gone: false, group: false }); this.f.q = '';
+    this.open = new Set(); this.iface = null;
+    crumbs([{ label: r.ip }]);
+    setHelp('<div><b>Роутер</b></div><div>Циферблаты — текущее состояние, цвет — светофор по порогам. «?» у циферблата — подробности; щелчок по циферблату — таблица процессов с подходящей сортировкой.</div><div>Период графиков выбирается под циферблатами (на сами циферблаты он не влияет); таблица процессов всегда за последний час.</div>');
+    m.innerHTML = `<div class="panel-h" style="margin-bottom:var(--gap)"><div class="hline"><h1 id="h-name">${esc(r.ip)}</h1><span class="sub" id="h-sub"></span></div>
+        <div class="r" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="badges" id="h-badges"></span></div></div>
+      ${hostTabs(r.ip, 'o')}
+      <div class="panel" style="margin-bottom:var(--gap)"><div class="gauges" id="h-kpis"></div></div>
+      <div style="margin-bottom:var(--gap)"><label class="ink2" style="font-size:13px;display:inline-flex;gap:6px;align-items:center">Период графиков
+          <select id="range" class="btn">${RANGES.map(h => `<option value="${h}"${h === this.range ? ' selected' : ''}>${rangeLabel(h)}</option>`).join('')}</select></label></div>
+      <div class="grid g-2">
+        <div class="panel"><div class="panel-h"><h2>CPU, %</h2><span class="muted" id="c-cpu-n"></span></div><div id="c-cpu"></div></div>
+        <div class="panel"><div class="panel-h"><h2>Память, МБ</h2><span class="muted" style="font-size:12px">наведите — разбивка</span></div><div id="c-mem"></div></div>
+        <div class="panel"><div class="panel-h"><h2>Температура, °C</h2></div><div id="c-temp"></div></div>
+        <div class="panel"><div class="panel-h"><h2>Сеть</h2><span class="r"><select id="ifsel" class="btn"></select></span></div><div id="c-net"></div></div>
+        <div class="panel"><div class="panel-h"><h2>Swap (zram), МБ</h2></div><div id="c-swap"></div></div>
+        <div class="panel"><div class="panel-h"><h2>Нагрузка (load average 1 мин)</h2></div><div id="c-load"></div></div>
+      </div>
+      <div class="grid g-12 section">
+        <div class="panel"><div class="panel-h"><h2>Интерфейсы</h2><span class="muted" style="font-size:12px">нажмите — показать на графике</span></div><div class="tbl-wrap"><table id="ifs"></table></div></div>
+        <div class="panel" id="tt-p"><div class="panel-h"><h2>Топ адресов</h2><span class="muted" style="font-size:12px" id="tt-sub"></span><a class="r" style="font-size:13px" href="${trafficHref(r.ip)}">Подробно →</a></div>
+          <div class="tbl-wrap" id="tt-wrap" style="overflow:hidden"><table id="tt-tab"></table></div></div>
+      </div>
+      <div class="panel section fold${lsGet('rmon.procsOpen', true) ? ' open' : ''}" id="p-panel">
+        <div class="panel-h fold-h" id="p-head" role="button" tabindex="0"><h2><span class="chev">▸</span> Процессы</h2><span class="muted" id="p-count" style="font-size:12px"></span><span class="r muted" style="font-size:12px">таблица — за последний час · CPU — % всей мощности роутера (все ядра = 100%)</span></div>
+        <div class="fold-b">
+        <div class="filters">
+          <input type="search" id="pq" placeholder="Поиск по имени, команде или PID">
+          <label><input type="checkbox" id="fg"> Группировать по имени</label>
+          <label><input type="checkbox" id="fk"> Потоки ядра</label>
+          <label><input type="checkbox" id="fz"> Завершившиеся за час</label>
+        </div>
+        <div class="tbl-wrap"><table id="ptab"></table></div>
+        </div>
+      </div>`;
+    // блок «Процессы» сворачивается щелчком по заголовку; состояние запоминается
+    const pp = $('#p-panel', m), ph = $('#p-head', m);
+    this.setProcsOpen = o => { pp.classList.toggle('open', o); ph.setAttribute('aria-expanded', o); lsSet('rmon.procsOpen', o); };
+    ph.setAttribute('aria-expanded', pp.classList.contains('open'));
+    ph.onclick = () => this.setProcsOpen(!pp.classList.contains('open'));
+    ph.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ph.onclick(); } };
+    const S = getComputedStyle(document.documentElement);
+    this.ch = {
+      cpu: new Chart($('#c-cpu', m), { stacked: true, max: 100, fmt: v => Math.round(v) + '', tipFmt: pct, totalLabel: 'Всего' }),
+      mem: new Chart($('#c-mem', m), { stacked: true, fmt: v => Math.round(v) + '', tipFmt: mb, totalLabel: 'Всего', extra: i => `<div class="row">Доступно приложениям<span class="v">${mb(this.H.avail[i])}</span></div>` }),
+      net: new Chart($('#c-net', m), { fmt: v => v >= 10 ? Math.round(v) + '' : (+v).toFixed(1).replace('.', ','), tipFmt: mbit }),
+      load: new Chart($('#c-load', m), { h: 140, fmt: v => (+v).toFixed(1).replace('.', ',') }),
+      temp: new Chart($('#c-temp', m), { h: 140 }),
+      swap: new Chart($('#c-swap', m), { h: 140, fmt: v => Math.round(v) + '', tipFmt: mb }),
+    };
+    $('#range', m).onchange = e => { this.range = +e.target.value; lsSet('rmon.rangeMin', this.range); tick(); };
+    const pq = $('#pq', m); pq.oninput = () => { this.f.q = pq.value.trim().toLowerCase(); this.renderProcs(); };
+    for (const [id, k] of [['fg', 'group'], ['fk', 'kern'], ['fz', 'gone']]) { const el = $('#' + id, m); el.checked = this.f[k]; el.onchange = () => { this.f[k] = el.checked; lsSet('rmon.pfilt', this.f); this.renderProcs(); }; }
+    $('#ifsel', m).onchange = e => { this.iface = e.target.value; this.renderNet(); this.renderIfs(); };
+  }
+  // «Топ адресов» за выбранный период: сайты, куда ходили устройства сети, объём получен/отправлен
+  renderTop() {
+    const T = this.tt; if (!T) return;
+    const g = groupTop(T.rows, true);
+    $('#tt-sub', this.m).textContent = topSub(T, this.range);
+    const t = $('#tt-tab', this.m), mx = Math.max(1, ...g.map(r => r.u + r.d));
+    t.innerHTML = `<tr><th class="n">#</th><th>Сайт / адрес</th><th class="hide-sm">Устройства</th><th class="n">↓ Получено</th><th class="n">↑ Отправлено</th><th class="n">Всего</th></tr>` +
+      (g.slice(0, 60).map((r, i) => `<tr title="${esc(r.hosts.slice(0, 12).map(h => h.h).join('\n'))}"><td class="n muted">${i + 1}</td>
+        <td><span class="pname">${esc(r.h)}</span>${r.hosts.length > 1 ? `<span class="tag">${r.hosts.length} ${plural(r.hosts.length, 'адрес', 'адреса', 'адресов')}</span>` : ''}</td>
+        <td class="hide-sm role" title="${esc(devTip(r.c, T))}">${esc(devTop(r.c, T))}</td><td class="n">${bytes(r.d)}</td><td class="n">${bytes(r.u)}</td>
+        <td class="n"><span class="vol"><i style="width:${((r.u + r.d) / mx * 100).toFixed(1)}%;background:var(--s1)"></i></span>${bytes(r.u + r.d)}</td></tr>`).join('')
+       || `<tr><td colspan="6" class="empty">${esc(T.empty)}</td></tr>`);
+    this.fitTop();
+  }
+  // окно стоит в ряду с «Интерфейсами»: список прокручивается внутри, по высоте не длиннее соседа
+  // высота окна = высоте «Интерфейсов»; строк столько, сколько целиком помещается, без прокрутки
+  // (отрисовано с запасом — лишние строки снизу убираются). Окна одно под другим (узкий экран) — 13 строк.
+  fitTop() {
+    const p = $('#tt-p', this.m), o = $('#ifs', this.m).closest('.panel'), t = $('#tt-tab', this.m);
+    const rows = () => t.querySelectorAll('tr:not(:first-child)');
+    p.style.height = '';
+    if (Math.abs(p.offsetTop - o.offsetTop) < 4) {
+      const H = o.offsetHeight;
+      let rs = rows(); for (let i = rs.length - 1; i > 0 && p.offsetHeight > H; i--) rs[i].remove();
+      p.style.height = H + 'px';
+    } else { const rs = rows(); for (let i = rs.length - 1; i >= 13; i--) rs[i].remove(); }
+  }
+  async refresh() {
+    // при смене периода предыдущий запрос может прийти позже нового — устаревший ответ отбрасываем
+    const seq = this.seq = (this.seq || 0) + 1, range = this.range;
+    const ttP = loadTop(range, this.ip);
+    const j = await api(this.ip, 'a=host&m=' + (range || 'all'));
+    if (seq !== this.seq || range !== this.range) return;
+    ttP.then(T => { if (seq === this.seq) { this.tt = T; this.renderTop(); } }).catch(() => {});
+    this.j = j; this.H = j.hist;
+    // «Всё»: в списке показываем, сколько истории есть на самом деле
+    if (!this.range && j.hist.t.length > 1) $('#range option[value="0"]', this.m).textContent = `Всё (${dur(last(j.hist.t) - j.hist.t[0]).replace(/ /g, ' ')})`;
+    crumbs([{ label: j.name || this.ip }]); document.title = `${j.name} · Мониторинг роутера`;
+    $('#h-name', this.m).textContent = (j.name || j.ip) + ':';
+    const hs = `${j.ip} · ${j.model} · ${j.fw} · ${j.ncpu} ядра · работает ${dur(j.uptime)}`;
+    $('#h-sub', this.m).textContent = hs; $('#h-sub', this.m).title = hs;
+    $('#h-badges', this.m).innerHTML = health(j).map(h => badge(...h)).join('');
+    const c = curOf(j), H = j.hist;
+    const avgArr = a => a && a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+    const cpuH = H.t.map((_, i) => H.user[i] + H.sys[i] + H.irq[i] + H.io[i]);
+    const rf = rangeFor(this.range);
+    const swT = (j.swapTotal || 0) / 1024, nc = j.ncpu || 1;
+    $('#h-kpis', this.m).innerHTML =
+      gauge({ label: 'CPU', value: c.cpu, max: 100, unit: '%', th: TH.cpu, title: 'Загрузка всех ядер за последние 10 с.',
+        sub: `В среднем за ${rf}: ${pct(avgArr(cpuH))}.`, sub2: `Процессы ${pct(c.user)}, ядро ${pct(c.sys)}, прерывания ${pct(c.irq)}, ожидание диска ${pct(c.io)}.`,
+        go: { sort: 'cpu', kern: true }, goText: 'процессы по загрузке CPU' }) +
+      gauge({ label: 'RAM', value: c.usedPct, max: 100, unit: '%', th: TH.mem, title: 'Занято = всего − доступно приложениям.',
+        sub: `Доступно ${mb(c.avail)} из ${mb(c.total)}.`, sub2: `Процессам ${mb(c.anon)}, ядру ${mb(c.kern)} (драйверы, zram, slab).`,
+        go: { sort: 'rss' }, goText: 'процессы по занятой памяти' }) +
+      (swT > 0 ? gauge({ label: 'Swap', value: c.swap / swT * 100, max: 100, th: TH.swap, text: mb(c.swap), title: 'Сжатая память в ОЗУ (zram), куда ядро вытесняет редко используемые страницы.',
+        sub: `Занято ${mb(c.swap)} из ${mb(swT)} (${pct(c.swap / swT * 100)}).`, go: { sort: 'swap' }, goText: 'процессы по объёму в swap' })
+        : gauge({ label: 'Swap', value: NaN, th: TH.swap, text: 'n/a', title: 'Swap на этом роутере не настроен.' })) +
+      gauge({ label: 'Load', value: c.load, max: nc * 2, th: [nc, nc * 1.5], fmt: v => (+v).toFixed(2).replace('.', ','), title: 'Load average за 1 мин: сколько процессов в среднем работает или ждёт CPU и диск.',
+        sub: `${nc} = все ${nc} ядра заняты полностью.`, sub2: `Среднее за ${rf}: ${f1(avgArr(H.load))}.`,
+        go: { chart: 'c-load' }, goText: 'график нагрузки' }) +
+      gauge({ label: 't° CPU', value: c.temp, max: 110, unit: '°C', th: TH.temp, title: 'Датчик температуры процессора.', sub: `Максимум за ${rf}: ${f1(Math.max(0, ...H.temp))} °C.`,
+        go: { chart: 'c-temp' }, goText: 'график температуры' }) +
+      (c.wtemp ? gauge({ label: 't° Wi-Fi', value: c.wtemp, max: 110, unit: '°C', th: TH.temp, title: wArcs(j).length > 1 ? 'Датчики температуры модулей Wi-Fi.' : 'Датчик температуры Wi-Fi.', sub: wTip(j), sub2: `Максимум за ${rf}: ${f1(Math.max(0, ...H.wtemp))} °C.`, arcs: wArcs(j),
+        go: { chart: 'c-temp' }, goText: 'график температуры' })
+        : gauge({ label: 't° Wi-Fi', value: NaN, th: TH.temp, text: 'n/a', title: 'На этом роутере нет датчика температуры Wi-Fi.' }));
+    this.bindGauges();
+    const v = k => H[k];
+    this.ch.cpu.set(H.t, [{ name: 'Процессы (user)', color: 'var(--s1)', v: v('user') }, { name: 'Ядро (system)', color: 'var(--s2)', v: v('sys') }, { name: 'Прерывания (irq/softirq)', color: 'var(--s3)', v: v('irq') }, { name: 'Ожидание диска (iowait)', color: 'var(--s4)', v: v('io') }]);
+    this.ch.mem.set(H.t, [{ name: 'Процессы', color: 'var(--s1)', v: v('anon') }, { name: 'Ядро', color: 'var(--s2)', v: v('kern') }, { name: 'Кэш файлов', color: 'var(--s3)', v: v('cache') }, { name: 'tmpfs / shmem', color: 'var(--s4)', v: v('shm') }, { name: 'Свободно', color: 'var(--free)', v: v('free') }]);
+    this.ch.mem.opt.max = c.total ? Math.ceil(c.total / 50) * 50 : 0;
+    this.ch.mem.draw();
+    this.ch.load.opt.ref = { v: j.ncpu, label: `${j.ncpu} = все ядра заняты` };
+    this.ch.load.set(H.t, [{ name: 'Load 1 мин', color: 'var(--s1)', v: v('load') }]);
+    const ts = [{ name: 'CPU', color: 'var(--s2)', v: v('temp') }]; if (H.wtemp.some(x => x > 0)) ts.push({ name: wArcs(j).length > 1 ? 'Wi-Fi (самый горячий модуль)' : 'Wi-Fi', color: 'var(--s1)', v: v('wtemp') });
+    this.ch.temp.set(H.t, ts);
+    this.ch.swap.set(H.t, [{ name: 'Swap занято', color: 'var(--s7)', v: v('swap') }]);
+    $('#c-cpu-n', this.m).textContent = '';
+    this.renderIfs(); this.renderNet(); this.renderProcs();
+  }
+  // циферблаты: щелчок — к таблице процессов с подходящей сортировкой; «?» — подсказка (наведение или щелчок)
+  bindGauges() {
+    const box = $('#h-kpis', this.m);
+    bindGaugeTips(box);
+    box.querySelectorAll('.gauge[data-go]').forEach(g => {
+      const go = () => this.goTo(JSON.parse(g.dataset.go));
+      g.onclick = go; g.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+    });
+    // пришли с циферблата карточки на главной — сразу открыть таблицу процессов с нужной сортировкой
+    if (pendingGo && pendingGo.ip === this.ip) { const g = pendingGo.go; pendingGo = null; setTimeout(() => this.goTo(g), 50); }
+  }
+  // куда ведёт щелчок по циферблату: { chart: id } — к графику, иначе — к таблице процессов с сортировкой
+  goTo(go) {
+    if (!go.chart) return this.goProcs(go);
+    openGaugeKey = null; this.m.querySelectorAll('.gauge.open').forEach(x => x.classList.remove('open'));
+    scrollToPanel($('#' + go.chart, this.m).closest('.panel'));
+  }
+  goProcs(go) {
+    this.sort = { k: go.sort, asc: false }; lsSet('rmon.psort', this.sort);
+    Object.assign(this.f, { q: go.q || '', kern: !!go.kern, gone: false, group: false });
+    $('#pq', this.m).value = this.f.q; $('#fg', this.m).checked = false; $('#fk', this.m).checked = this.f.kern; $('#fz', this.m).checked = false;
+    openGaugeKey = null; this.m.querySelectorAll('.gauge.open').forEach(x => x.classList.remove('open'));
+    this.setProcsOpen(true);   // щелчок по циферблату ведёт к таблице — она должна быть развёрнута
+    this.renderProcs();
+    scrollToPanel($('#p-panel', this.m));
+  }
+  ifStats() {
+    const N = this.j.net || {}, out = [];
+    for (const [nm, s] of Object.entries(N)) {
+      const a = s.rx.reduce((x, y) => x + y, 0) / (s.rx.length || 1), b = s.tx.reduce((x, y) => x + y, 0) / (s.tx.length || 1);
+      out.push({ name: nm, rx: last(s.rx), tx: last(s.tx), arx: a, atx: b, prx: Math.max(0, ...s.rx), ptx: Math.max(0, ...s.tx), sum: a + b });
+    }
+    return out.sort((x, y) => y.sum - x.sum);
+  }
+  renderIfs() {
+    const st = this.ifStats();
+    if (!this.iface || !this.j.net[this.iface]) this.iface = (this.j.net[this.j.wan] ? this.j.wan : st[0] && st[0].name);
+    const sel = $('#ifsel', this.m);
+    sel.innerHTML = st.map(s => `<option value="${esc(s.name)}"${s.name === this.iface ? ' selected' : ''}>${esc(s.name)}${s.name === this.j.wan ? ' (WAN)' : ''}</option>`).join('');
+    const t = $('#ifs', this.m);
+    t.innerHTML = `<tr><th>Интерфейс</th><th class="n">↓ сейчас</th><th class="n">↑ сейчас</th><th class="n hide-sm">↓ средн.</th><th class="n hide-sm">↑ средн.</th><th class="n">↓ пик</th></tr>` +
+      st.filter(s => s.sum > 0.0005 || s.name === this.iface).map(s => `<tr class="click${s.name === this.iface ? '" style="background:var(--sel)' : ''}" data-if="${esc(s.name)}"><td class="mono">${esc(s.name)}${s.name === this.j.wan ? '<span class="tag">WAN</span>' : ''}</td><td class="n">${mbit(s.rx)}</td><td class="n">${mbit(s.tx)}</td><td class="n hide-sm">${mbit(s.arx)}</td><td class="n hide-sm">${mbit(s.atx)}</td><td class="n">${mbit(s.prx)}</td></tr>`).join('');
+    t.querySelectorAll('tr[data-if]').forEach(tr => tr.onclick = () => { this.iface = tr.dataset.if; this.renderIfs(); this.renderNet(); });
+  }
+  renderNet() {
+    const s = this.j.net[this.iface];
+    if (!s) { this.ch.net.set([], []); return; }
+    this.ch.net.set(s.t, [{ name: '↓ приём', color: 'var(--s1)', v: s.rx }, { name: '↑ передача', color: 'var(--s2)', v: s.tx }]);
+  }
+  renderProcs() {
+    const all = this.j.procs || [], f = this.f;
+    let rows = all.filter(p => (f.kern || !p.k) && (f.gone || !p.gone));
+    // поиск: несколько вариантов через «|» — подходит любой
+    const terms = (f.q || '').toLowerCase().split('|').map(s => s.trim()).filter(Boolean);
+    if (terms.length) rows = rows.filter(p => terms.some(q => p.name.toLowerCase().includes(q) || (p.cmd || '').toLowerCase().includes(q) || String(p.pid) === q));
+    const sw = this.j.swap || {};
+    rows.forEach(p => { p.drss = p.rss - p.rss0; p.swap = p.gone ? 0 : (sw[p.pid] || 0); });
+    const live = all.filter(p => !p.gone);
+    $('#p-count', this.m).textContent = `${live.length} процессов, из них потоков ядра ${live.filter(p => p.k).length}; сумма RSS ${kb(live.reduce((a, p) => a + p.rss, 0))}`;
+    const cols = [{ k: 'name', label: 'Процесс' }, { k: 'pid', label: 'PID', n: 1 }, { k: 'cpu', label: 'CPU 10 с', n: 1, title: 'за последние 10 секунд' }, { k: 'avg', label: 'CPU средн.', n: 1, title: 'среднее за последний час (или время жизни процесса)' }, { k: 'peak', label: 'CPU пик', n: 1, title: 'максимум за 10 с в течение часа', cls: 'hide-sm' },
+      { k: 'rss', label: 'Память', n: 1, title: 'RSS — физическая память процесса' }, { k: 'drss', label: 'Δ за час', n: 1, title: 'изменение RSS за час', cls: 'hide-sm' }, { k: 'swap', label: 'Swap', n: 1, title: 'сколько памяти процесса вытеснено в swap (zram)', cls: 'hide-sm' }, { k: 'thr', label: 'Потоки', n: 1, cls: 'hide-sm' }, { k: 'state', label: 'Сост.', cls: 'hide-sm' }];
+    const t = $('#ptab', this.m), ip = this.ip;
+    const prow = (p, member) => `<tr class="click${member ? ' member' : ''}${p.gone ? ' gone' : ''}" data-h="${procHref(ip, p.pid, p.st)}"><td><span class="pname">${esc(p.name)}</span>${p.k ? '<span class="tag">ядро</span>' : ''}${p.gone ? '<span class="tag">завершён</span>' : ''}<span class="pcmd mono" title="${esc(p.cmd)}">${esc(p.cmd)}</span></td>
+      <td class="n">${p.pid}</td><td class="n">${cpuCell(p.cpu)}</td><td class="n">${pct(p.avg)}</td><td class="n hide-sm">${pct(p.peak)}</td><td class="n">${kb(p.rss)}</td>
+      <td class="n hide-sm ${p.drss > 1024 && p.drss > p.rss0 * 0.1 ? 'up' : ''}">${p.drss ? (p.drss > 0 ? '+' : '−') + kb(Math.abs(p.drss)) : '—'}</td><td class="n hide-sm">${p.swap ? kb(p.swap) : '—'}</td><td class="n hide-sm">${p.thr}</td><td class="hide-sm" title="${esc(STATE[p.state] || '')}">${esc(p.state)}</td></tr>`;
+    let body = '';
+    if (f.group) {
+      const g = new Map(); for (const p of rows) { if (!g.has(p.name)) g.set(p.name, []); g.get(p.name).push(p); }
+      const groups = [...g.entries()].map(([name, ps]) => ({ name, ps, pid: ps.length, cpu: ps.reduce((a, p) => a + p.cpu, 0), avg: ps.reduce((a, p) => a + p.avg, 0), peak: Math.max(...ps.map(p => p.peak)), rss: ps.reduce((a, p) => a + p.rss, 0), drss: ps.reduce((a, p) => a + p.drss, 0), swap: ps.reduce((a, p) => a + p.swap, 0), thr: ps.reduce((a, p) => a + p.thr, 0), state: '' }));
+      for (const G of sortRows(groups, this.sort.k, this.sort.asc)) {
+        if (G.ps.length === 1) { body += prow(G.ps[0]); continue; }
+        const o = this.open.has(G.name);
+        body += `<tr class="click grp" data-g="${esc(G.name)}"><td>${o ? '▾' : '▸'} ${esc(G.name)} <span class="tag">${G.ps.length} шт.</span></td><td class="n muted">—</td><td class="n">${cpuCell(G.cpu)}</td><td class="n">${pct(G.avg)}</td><td class="n hide-sm">${pct(G.peak)}</td><td class="n">${kb(G.rss)}</td><td class="n hide-sm">${G.drss ? (G.drss > 0 ? '+' : '−') + kb(Math.abs(G.drss)) : '—'}</td><td class="n hide-sm">${G.swap ? kb(G.swap) : '—'}</td><td class="n hide-sm">${G.thr}</td><td class="hide-sm"></td></tr>`;
+        if (o) for (const p of sortRows(G.ps, this.sort.k, this.sort.asc)) body += prow(p, true);
+      }
+    } else body = sortRows(rows, this.sort.k, this.sort.asc).map(p => prow(p)).join('');
+    t.innerHTML = thead(cols, this.sort) + (body || `<tr><td colspan="10" class="empty">Ничего не найдено</td></tr>`);
+    t.querySelectorAll('tr[data-h]').forEach(tr => tr.onclick = () => location.hash = tr.dataset.h);
+    t.querySelectorAll('tr[data-g]').forEach(tr => tr.onclick = () => { const k = tr.dataset.g; this.open.has(k) ? this.open.delete(k) : this.open.add(k); this.renderProcs(); });
+    bindSort(t, this.sort, () => { lsSet('rmon.psort', this.sort); this.renderProcs(); });
+  }
+}
+
+// ================= Роутер · Трафик =================
+// подробный разбор трафика: все интерфейсы со скоростями, объёмом за период, назначением, клиентами Wi-Fi;
+// отмеченные в таблице интерфейсы (до 6) — на графиках приёма и передачи
+class TrafficView {
+  constructor(m, r) {
+    this.m = m; this.ip = r.ip;
+    this.range = +lsGet('rmon.rangeMin', 60); if (!RANGES.includes(this.range)) this.range = 60;
+    this.sort = lsGet('rmon.tsort', { k: 'vol', asc: false }); this.idle = false;
+    this.col = lsGet('rmon.tsel.' + r.ip, null);   // интерфейс → номер цвета; null — выбрать по умолчанию
+    crumbs([{ label: r.ip, href: hostHref(r.ip) }, { label: 'Трафик' }]);
+    setHelp('<div><b>Трафик роутера</b></div><div>Графики — приём и передача по отмеченным в таблице интерфейсам. «Адреса» (сворачиваются) — обмен с интернетом за период только клиентов этого роутера (Wi-Fi-станции его точек доступа и устройства на его LAN-портах, по текущему подключению): по сайтам (основной домен) или по отдельным адресам, с фильтром по устройству; подробно об устройствах — на вкладке «Клиенты». Домены берутся из журнала DNS, соединения замеряются раз в 10 с, поэтому очень короткие соединения могут не попасть. Строка с именем роутера — его собственный трафик (например, торрент-клиент).</div><div>Ниже — скорость и объём по каждому интерфейсу. Отметьте до 6 интерфейсов в таблице — они появятся на графиках приёма и передачи.</div><div>Мост (br-…) суммирует трафик своих портов и Wi-Fi, поэтому объёмы моста и его участников не складываются.</div>');
+    m.innerHTML = `<div class="panel-h" style="margin-bottom:var(--gap)"><div class="hline"><h1 id="t-name">${esc(r.ip)}</h1><span class="sub" id="t-sub"></span></div></div>
+      ${hostTabs(r.ip, 't')}
+      <div class="panel" style="margin-bottom:var(--gap)"><div class="kpis even" id="t-kpis"></div></div>
+      <div style="margin-bottom:var(--gap)"><label class="ink2" style="font-size:13px;display:inline-flex;gap:6px;align-items:center">Период
+          <select id="t-range" class="btn">${RANGES.map(h => `<option value="${h}"${h === this.range ? ' selected' : ''}>${rangeLabel(h)}</option>`).join('')}</select></label></div>
+      <div class="grid g-eq">
+        <div class="panel"><div class="panel-h"><h2>↓ Приём, Мбит/с</h2><span class="muted" style="font-size:12px">отмеченные интерфейсы</span></div><div id="t-rx"></div></div>
+        <div class="panel"><div class="panel-h"><h2>↑ Передача, Мбит/с</h2><span class="muted" style="font-size:12px">отмеченные интерфейсы</span></div><div id="t-tx"></div></div>
+      </div>
+      <div class="panel section"><div class="panel-h"><h2>Интерфейсы</h2><span class="muted" style="font-size:12px" id="t-cnt"></span>
+          <label class="r ink2" style="font-size:13px;display:inline-flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="t-idle"> Показать без трафика</label></div>
+        <div class="tbl-wrap"><table id="t-tab"></table></div></div>
+      <div class="panel section fold${lsGet('rmon.addrFold', false) ? ' open' : ''}" id="ta-p">
+        <div class="panel-h fold-h" id="ta-h" role="button" tabindex="0"><h2><span class="chev">▸</span> Адреса</h2><span class="muted" style="font-size:12px" id="ta-sub"></span>
+          <span class="r seg" id="ta-mode" role="group" aria-label="Группировка"><button type="button" data-m="site">По сайтам</button><button type="button" data-m="host">По адресам</button></span></div>
+        <div class="fold-b">
+          <div class="filters"><input type="search" id="ta-q" placeholder="Поиск по домену или IP"><select id="ta-dev" class="btn" aria-label="Устройство"></select></div>
+          <div class="tbl-wrap" style="max-height:620px;overflow-y:auto"><table id="ta-tab"></table></div></div></div>`;
+    const fmt = v => v >= 10 ? Math.round(v) + '' : (+v).toFixed(1).replace('.', ',');
+    this.ch = { rx: new Chart($('#t-rx', m), { h: 260, fmt, tipFmt: mbit }), tx: new Chart($('#t-tx', m), { h: 260, fmt, tipFmt: mbit }) };
+    $('#t-range', m).onchange = e => { this.range = +e.target.value; lsSet('rmon.rangeMin', this.range); tick(); };
+    $('#t-idle', m).onchange = e => { this.idle = e.target.checked; this.renderTab(); };
+    // адреса и устройства
+    this.ta = { mode: lsGet('rmon.tamode', 'site'), q: '', dev: '', open: new Set() };
+    m.querySelectorAll('#ta-mode button').forEach(b => b.onclick = () => { this.ta.mode = b.dataset.m; lsSet('rmon.tamode', this.ta.mode); this.renderAddr(); });
+    $('#ta-q', m).oninput = e => { this.ta.q = e.target.value.trim().toLowerCase(); this.renderAddr(); };
+    $('#ta-dev', m).onchange = e => { this.ta.dev = e.target.value; this.renderAddr(); };
+    // «Адреса» сворачиваются щелчком по заголовку (кнопки группировки в заголовке не сворачивают); состояние запоминается
+    const fp = $('#ta-p', m), fh = $('#ta-h', m);
+    const fold = () => { const o = !fp.classList.contains('open'); fp.classList.toggle('open', o); fh.setAttribute('aria-expanded', o); lsSet('rmon.addrFold', o); };
+    fh.setAttribute('aria-expanded', fp.classList.contains('open'));
+    fh.onclick = e => { if (!e.target.closest('#ta-mode')) fold(); };
+    fh.onkeydown = e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === fh) { e.preventDefault(); fold(); } };
+  }
+  // список устройств для фильтра адресов (подробная таблица устройств — на вкладке «Клиенты»)
+  renderDev() {
+    const T = this.tt; if (!T) return;
+    const D = new Map();
+    for (const r of T.rows) for (const [c, v] of Object.entries(r.c)) { const o = D.get(c) || 0; D.set(c, o + v[0] + v[1]); }
+    const ds = [...D.entries()].sort((a, b) => b[1] - a[1]), cur = this.ta.dev;
+    if (cur && !D.has(cur)) this.ta.dev = '';
+    $('#ta-dev', this.m).innerHTML = `<option value="">Все устройства</option>` + ds.map(([c]) => `<option value="${esc(c)}"${c === this.ta.dev ? ' selected' : ''}>${esc(devFull(c, T))}</option>`).join('');
+  }
+  renderAddr() {
+    const T = this.tt; if (!T) return;
+    const { mode, q, dev } = this.ta;
+    $('#ta-mode', this.m).querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.m === mode));
+    // выбрано устройство — объёмы только этого устройства
+    let rows = T.rows;
+    if (dev) rows = rows.filter(r => r.c[dev]).map(r => ({ ...r, u: r.c[dev][0], d: r.c[dev][1], c: { [dev]: r.c[dev] } }));
+    let g = groupTop(rows, mode === 'site');
+    if (q) g = g.filter(r => r.h.toLowerCase().includes(q) || r.hosts.some(h => h.h.toLowerCase().includes(q) || h.ip.includes(q)));
+    const sum = g.reduce((a, r) => a + r.u + r.d, 0);
+    $('#ta-sub', this.m).textContent = `${topSub(T, this.range)} · ${g.length} ${mode === 'site' ? plural(g.length, 'сайт', 'сайта', 'сайтов') : plural(g.length, 'адрес', 'адреса', 'адресов')}, ${bytes(sum)}`;
+    const mx = Math.max(1, ...g.map(r => r.u + r.d));
+    const row = (r, i, sub) => `<tr${!sub && r.hosts.length > 1 ? ` class="click" data-g="${esc(r.h)}"` : ''}${sub ? ' class="member"' : ''}>
+      <td class="n muted">${sub ? '' : i + 1}</td>
+      <td style="white-space:nowrap">${!sub && r.hosts.length > 1 ? (this.ta.open.has(r.h) ? '▾ ' : '▸ ') : ''}<span class="${sub ? '' : 'pname'}">${esc(r.h)}</span>${!sub && r.hosts.length > 1 ? `<span class="tag">${r.hosts.length} ${plural(r.hosts.length, 'адрес', 'адреса', 'адресов')}</span>` : ''}</td>
+      <td class="mono hide-sm muted" style="white-space:nowrap">${r.hosts.length === 1 && r.hosts[0].h !== r.hosts[0].ip ? esc(r.hosts[0].ip) + (r.hosts[0].n > 1 ? ` +${r.hosts[0].n - 1}` : '') : ''}</td>
+      <td class="hide-sm role" title="${esc(devTip(r.c, T))}">${esc(devTop(r.c, T))}</td><td class="n">${bytes(r.d)}</td><td class="n">${bytes(r.u)}</td>
+      <td class="n"><span class="vol"><i style="width:${((r.u + r.d) / mx * 100).toFixed(1)}%;background:var(--s1)"></i></span>${bytes(r.u + r.d)}</td></tr>`;
+    const t = $('#ta-tab', this.m);
+    t.innerHTML = `<tr><th class="n">#</th><th>${mode === 'site' ? 'Сайт' : 'Адрес'}</th><th class="hide-sm">IP</th><th class="hide-sm" style="width:100%">Устройства</th><th class="n">↓ Получено</th><th class="n">↑ Отправлено</th><th class="n">Всего</th></tr>` +
+      (g.slice(0, 300).map((r, i) => row(r, i) + (this.ta.open.has(r.h) && r.hosts.length > 1 ? r.hosts.map(h => row({ ...h, hosts: [h] }, 0, true)).join('') : '')).join('')
+       || `<tr><td colspan="7" class="empty">${esc(q || dev ? 'Ничего не найдено' : T.empty)}</td></tr>`);
+    t.querySelectorAll('tr[data-g]').forEach(tr => tr.onclick = () => { const k = tr.dataset.g; this.ta.open.has(k) ? this.ta.open.delete(k) : this.ta.open.add(k); this.renderAddr(); });
+  }
+  async refresh() {
+    const seq = this.seq = (this.seq || 0) + 1, range = this.range;
+    const ttP = loadTop(range, this.ip);
+    const j = await api(this.ip, 'a=traffic&m=' + (range || 'all'));
+    if (seq !== this.seq || range !== this.range) return;
+    ttP.then(T => { if (seq === this.seq) { this.tt = T; this.renderDev(); this.renderAddr(); } }).catch(() => {});
+    this.j = j;
+    crumbs([{ label: j.name || this.ip, href: hostHref(this.ip) }, { label: 'Трафик' }]); document.title = `Трафик · ${j.name} · Мониторинг роутера`;
+    $('#t-name', this.m).textContent = (j.name || j.ip) + ':';
+    $('#t-sub', this.m).textContent = `${j.ip} · трафик за ${rangeFor(this.range)}`;
+    this.rows = this.stats();
+    // по умолчанию на графиках — канал и два самых нагруженных интерфейса
+    if (!this.col || !Object.keys(this.col).some(k => j.net[k])) {
+      this.col = {}; const pick = [j.wan, ...sortRows(this.rows.filter(r => r.name !== j.wan && !r.br), 'vol', false).map(r => r.name)].filter(n => j.net[n]).slice(0, 3);
+      pick.forEach((n, i) => this.col[n] = i);
+    }
+    this.renderKpis(); this.renderCharts(); this.renderTab();
+  }
+  // назначение интерфейса — по сети OpenWrt, мосту, данным Wi-Fi и имени
+  role(n) {
+    const j = this.j, i = (j.ifi || {})[n] || {}, lg = (j.lg || {})[n], w = i.w;
+    if (w) return w.type === 'mesh' ? `Mesh ${band(w.f)}` : `Wi-Fi ${band(w.f)}${w.ssid ? ' · ' + w.ssid : ''}${w.type && w.type !== 'AP' ? ' (' + w.type + ')' : ''}`;
+    if (/^br-/.test(n)) return `мост${lg ? ' · сеть ' + lg : ''}`;
+    if (/^(awg|wg|tun|tap|tailscale|ovpn|zt)/.test(n)) return `VPN-туннель${lg && lg !== n ? ' · ' + lg : ''}`;
+    if (/^(gre|ip6gre|erspan|vxlan)/.test(n)) return `туннель${lg ? ' · ' + lg : ''}`;
+    if (lg) return `сеть ${lg}`;
+    if (/^(eth|lan|wan|sfp)/.test(n)) return 'порт';
+    return '';
+  }
+  stats() {
+    const j = this.j, N = j.net || {}, I = j.ifi || {}, out = [];
+    const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
+    const names = new Set([...Object.keys(N), ...Object.keys(I)]);
+    for (const n of names) {
+      const s = N[n] || { t: [], rx: [], tx: [], brx: 0, btx: 0 }, i = I[n] || {};
+      out.push({ name: n, role: this.role(n), br: /^br-/.test(n), m: i.m || '', st: i.st || '', sp: i.sp || 0, sta: i.w && (i.w.type === 'AP' || i.w.type === 'mesh') ? i.w.sta : null, mesh: i.w && i.w.type === 'mesh',
+        rx: last(s.rx) || 0, tx: last(s.tx) || 0, arx: avg(s.rx), atx: avg(s.tx), prx: Math.max(0, ...s.rx), ptx: Math.max(0, ...s.tx), brx: s.brx || 0, btx: s.btx || 0, vol: (s.brx || 0) + (s.btx || 0), has: !!N[n] });
+    }
+    return out;
+  }
+  renderKpis() {
+    const j = this.j, w = this.rows.find(r => r.name === j.wan) || {}, lw = (j.lg || {})[j.wan] || '';
+    const up = /^wan/.test(lw) ? 'Интернет' : 'Канал', rf = rangeFor(this.range);
+    const ap = this.rows.filter(r => r.sta != null && !r.mesh), mesh = this.rows.filter(r => r.mesh);
+    const k = (l, v, s = '') => `<div class="kpi"><div class="l">${l}</div><div class="v num">${v}</div><div class="s">${s}</div></div>`;
+    const u = s => { const m = String(s).match(/^(\S+)\s(.*)$/); return m ? `${m[1]}<small>${m[2]}</small>` : s; };
+    const ct = j.ct || [0, 0];
+    $('#t-kpis', this.m).innerHTML =
+      k(`${up} ↓ сейчас`, u(mbit(w.rx)), `${esc(j.wan || '—')} · пик ${mbit(w.prx)}`) +
+      k(`${up} ↑ сейчас`, u(mbit(w.tx)), `пик ${mbit(w.ptx)}`) +
+      k('Принято', u(bytes(w.brx)), `за ${rf}`) +
+      k('Отдано', u(bytes(w.btx)), `за ${rf}`) +
+      `<a class="kpi" href="${clientsHref(this.ip)}" title="Открыть вкладку «Клиенты»"><div class="l">Клиенты Wi-Fi →</div><div class="v num">${ap.reduce((a, r) => a + (r.sta || 0), 0)}</div><div class="s">${ap.length ? `на ${ap.length} ${plural(ap.length, 'точке', 'точках', 'точках')} доступа` : 'точек доступа нет'}</div></a>` +
+      (mesh.length ? k('Соседи mesh', mesh.reduce((a, r) => a + (r.sta || 0), 0), mesh.map(r => r.name).join(', ')) : '') +
+      k('Соединения', ct[0], ct[1] ? `из ${ct[1]} возможных (conntrack)` : 'conntrack') +
+      k('Активных интерфейсов', this.rows.filter(r => r.vol > 0).length, `из ${this.rows.length}`);
+  }
+  renderCharts() {
+    const N = this.j.net || {}, sel = Object.entries(this.col).filter(([n]) => N[n]).sort((a, b) => a[1] - b[1]);
+    const al = d => alignSeries(sel.map(([n]) => ({ t: N[n].t, v: N[n][d] })));
+    for (const d of ['rx', 'tx']) {
+      const a = al(d);
+      this.ch[d].set(a.t, sel.map(([n, c], i) => ({ name: n, color: SER[c], v: a.vs[i] })));
+    }
+  }
+  renderTab() {
+    const j = this.j, cols = [{ k: '', label: '' }, { k: 'name', label: 'Интерфейс' }, { k: 'role', label: 'Назначение', cls: 'hide-sm' }, { k: 'sp', label: 'Связь', cls: 'hide-sm' }, { k: 'sta', label: 'Клиенты', n: 1, title: 'Wi-Fi: подключённые устройства; mesh: соседние узлы' },
+      { k: 'rx', label: '↓ сейчас', n: 1 }, { k: 'tx', label: '↑ сейчас', n: 1 }, { k: 'arx', label: '↓ средн.', n: 1, cls: 'hide-sm' }, { k: 'atx', label: '↑ средн.', n: 1, cls: 'hide-sm' },
+      { k: 'prx', label: '↓ пик', n: 1, cls: 'hide-sm' }, { k: 'ptx', label: '↑ пик', n: 1, cls: 'hide-sm' }, { k: 'brx', label: 'Принято', n: 1, title: 'объём за период' }, { k: 'btx', label: 'Отдано', n: 1, title: 'объём за период' }];
+    const all = this.rows, rows = all.filter(r => this.idle || r.vol > 0 || r.name in this.col);
+    $('#t-cnt', this.m).textContent = `${rows.length} из ${all.length} · объём — за ${rangeFor(this.range)} · отметьте до ${SER.length} для графиков`;
+    const mx = Math.max(1, ...rows.map(r => Math.max(r.brx, r.btx)));
+    const link = r => r.st === 'up' ? (r.sp ? (r.sp >= 1000 ? `${f1(r.sp / 1000)} Гбит/с` : `${r.sp} Мбит/с`) : 'работает') : r.st === 'unknown' ? 'работает' : r.st === 'lowerlayerdown' ? 'нет кабеля' : r.st === 'down' ? 'выключен' : r.st || '—';
+    const vb = (v, c) => `<span class="vol"><i style="width:${(v / mx * 100).toFixed(1)}%;background:${c}"></i></span>${bytes(v)}`;
+    const t = $('#t-tab', this.m);
+    t.innerHTML = thead(cols, this.sort) + (sortRows(rows, this.sort.k, this.sort.asc).map(r => {
+      const c = this.col[r.name], on = c != null;
+      return `<tr class="click" data-if="${esc(r.name)}"${on ? ' style="background:var(--sel)"' : ''}><td class="ck"><input type="checkbox" ${on ? 'checked' : ''} ${!r.has ? 'disabled' : ''} aria-label="Показать ${esc(r.name)} на графиках"></td>
+        <td class="mono" style="white-space:nowrap">${on ? `<span class="sw" style="background:${SER[c]}"></span>` : ''}${esc(r.name)}${r.name === j.wan ? '<span class="tag">WAN</span>' : ''}</td>
+        <td class="hide-sm"><span class="role">${esc(r.role)}${r.m ? `${r.role ? ' · ' : ''}в мосту ${esc(r.m)}` : ''}</span></td>
+        <td class="hide-sm role">${esc(link(r))}</td><td class="n">${r.sta != null ? r.sta : '—'}</td>
+        <td class="n">${mbit(r.rx)}</td><td class="n">${mbit(r.tx)}</td><td class="n hide-sm">${mbit(r.arx)}</td><td class="n hide-sm">${mbit(r.atx)}</td><td class="n hide-sm">${mbit(r.prx)}</td><td class="n hide-sm">${mbit(r.ptx)}</td>
+        <td class="n">${vb(r.brx, 'var(--s1)')}</td><td class="n">${vb(r.btx, 'var(--s2)')}</td></tr>`;
+    }).join('') || `<tr><td colspan="13" class="empty">Данные ещё собираются…</td></tr>`);
+    t.querySelector('th').classList.remove('sort');
+    t.querySelectorAll('tr[data-if]').forEach(tr => tr.onclick = e => {
+      const n = tr.dataset.if; if (!(this.j.net || {})[n]) return;
+      if (n in this.col) delete this.col[n];
+      else { const used = new Set(Object.values(this.col)); const free = SER.findIndex((_, i) => !used.has(i)); if (free < 0) { e.preventDefault(); return; } this.col[n] = free; }
+      lsSet('rmon.tsel.' + this.ip, this.col); this.renderCharts(); this.renderTab();
+    });
+    bindSort(t, this.sort, () => { lsSet('rmon.tsort', this.sort); this.renderTab(); });
+  }
+}
+
+// ================= Роутер · Клиенты =================
+// клиенты этого роутера сейчас: Wi-Fi-станции его точек доступа (сигнал, скорость канала, время в сети) и
+// проводные устройства на его портах; объём обмена с интернетом — за выбранный период
+class ClientsView {
+  constructor(m, r) {
+    this.m = m; this.ip = r.ip;
+    this.range = +lsGet('rmon.rangeMin', 60); if (!RANGES.includes(this.range)) this.range = 60;
+    this.sort = lsGet('rmon.csort', { k: 'sig', asc: false });
+    crumbs([{ label: r.ip, href: hostHref(r.ip) }, { label: 'Клиенты' }]);
+    setHelp('<div><b>Клиенты роутера</b></div><div>Устройства, подключённые к этому роутеру прямо сейчас: по Wi-Fi (к его точкам доступа) и по проводу (к его LAN-портам). Хостнейм — из статических хостов /etc/config/dhcp, у незнакомого устройства пусто.</div><div>Сигнал: зелёный — от −60 дБм, жёлтый — до −70, красный — слабее. Скорость канала — согласованная скорость Wi-Fi (↓ к устройству, ↑ от него), а не фактический трафик. Получено и отправлено — обмен с интернетом за период.</div>');
+    m.innerHTML = `<div class="panel-h" style="margin-bottom:var(--gap)"><div class="hline"><h1 id="c-name">${esc(r.ip)}</h1><span class="sub" id="c-sub"></span></div></div>
+      ${hostTabs(r.ip, 'c')}
+      <div class="panel" style="margin-bottom:var(--gap)"><div class="kpis even" id="c-kpis"></div></div>
+      <div style="margin-bottom:var(--gap)"><label class="ink2" style="font-size:13px;display:inline-flex;gap:6px;align-items:center">Период (для объёма)
+          <select id="c-range" class="btn">${RANGES.map(h => `<option value="${h}"${h === this.range ? ' selected' : ''}>${rangeLabel(h)}</option>`).join('')}</select></label></div>
+      <div class="panel"><div class="panel-h"><h2>Клиенты</h2><span class="muted" style="font-size:12px" id="c-cnt"></span></div>
+        <div class="tbl-wrap"><table id="c-tab"></table></div></div>`;
+    $('#c-range', m).onchange = e => { this.range = +e.target.value; lsSet('rmon.rangeMin', this.range); tick(); };
+  }
+  async refresh() {
+    const seq = this.seq = (this.seq || 0) + 1, range = this.range;
+    const T = await loadTop(range, this.ip);
+    if (seq !== this.seq || range !== this.range) return;
+    if (!T.cl) throw new Error('роутер не отдал список клиентов');
+    this.T = T; const cl = T.cl;
+    crumbs([{ label: cl.name || this.ip, href: hostHref(this.ip) }, { label: 'Клиенты' }]); document.title = `Клиенты · ${cl.name} · Мониторинг роутера`;
+    $('#c-name', this.m).textContent = (cl.name || this.ip) + ':';
+    $('#c-sub', this.m).textContent = `${this.ip} · клиенты сейчас · объём за ${rangeFor(this.range)}`;
+    // MAC → IP-адреса и имя (по таблице устройств шлюза: ARP + статические хосты)
+    const byMac = {};
+    // (без служебных адресов 169.254.x.x)
+    for (const [ip, d] of Object.entries(T.devs)) if (d.m && !ip.startsWith('169.254.')) { const o = byMac[d.m] || (byMac[d.m] = { ips: [], n: '' }); o.ips.push(ip); if (d.n && !o.n) o.n = d.n; }
+    // объём за период по каждому IP — из топа адресов
+    const vol = {}; for (const r of T.rows) for (const [c, v] of Object.entries(r.c)) { const p = vol[c] || (vol[c] = [0, 0]); p[0] += v[0]; p[1] += v[1]; }
+    const sortIp = a => a.slice().sort((x, y) => x.split('.').map(Number).reduce((s, n, i) => s || n - y.split('.').map(Number)[i], 0));
+    const row = (mac, how, x) => {
+      const d = byMac[mac] || { ips: [], n: '' }, ips = sortIp(d.ips);
+      const u = ips.reduce((a, ip) => a + ((vol[ip] || [0])[0]), 0), g = ips.reduce((a, ip) => a + ((vol[ip] || [0, 0])[1]), 0);
+      return { n: d.n, ip: ips.join(', '), ipk: ips[0] || '', m: mac, how, u, d: g, ...x };
+    };
+    const rows = [], aps = cl.aps || {};
+    for (const s of cl.sta || []) {
+      const a = aps[s.if] || {};
+      rows.push(row(s.m, `Wi-Fi ${band(a.f)}${a.ssid ? ' · ' + a.ssid : ''}`, { wifi: 1, b: band(a.f), sig: s.sig, tx: s.tx, rx: s.rx, ct: s.ct, inact: s.in / 1000, ifn: s.if }));
+    }
+    const rmac = new Set(Object.keys(T.rnames).map(r => r === this.ip ? '' : ((T.devs[r] || {}).m || '')).filter(Boolean));
+    for (const [port, ms] of Object.entries(cl.wired || {})) {
+      if (ms.some(x => rmac.has(x))) continue;   // за портом другой роутер — магистраль
+      for (const x of ms) rows.push(row(x, `провод · ${port}`, { wifi: 0, sig: null, tx: null, rx: null, ct: null, inact: null, ifn: port }));
+    }
+    this.rows = rows; this.renderKpis(); this.renderTab();
+  }
+  renderKpis() {
+    const R = this.rows, w = R.filter(r => r.wifi), sig = w.map(r => r.sig).filter(x => x < 0);
+    const k = (l, v, s = '') => `<div class="kpi"><div class="l">${l}</div><div class="v num">${v}</div><div class="s">${s}</div></div>`;
+    const weak = w.filter(r => r.sig < -70).length;
+    $('#c-kpis', this.m).innerHTML =
+      k('Всего клиентов', R.length, 'подключено сейчас') +
+      k('Wi-Fi 2,4 ГГц', w.filter(r => r.b === '2,4 ГГц').length, 'дальше, медленнее') +
+      k('Wi-Fi 5 ГГц', w.filter(r => r.b === '5 ГГц').length, 'быстрее, ближе') +
+      (w.some(r => r.b === '6 ГГц') ? k('Wi-Fi 6 ГГц', w.filter(r => r.b === '6 ГГц').length) : '') +
+      k('По проводу', R.length - w.length, 'LAN-порты роутера') +
+      k('Средний сигнал', sig.length ? `${Math.round(sig.reduce((a, b) => a + b, 0) / sig.length)}<small>дБм</small>` : '—', 'по Wi-Fi-клиентам') +
+      k('Слабый сигнал', `<span class="${weak ? 'sig-bad' : ''}">${weak}</span>`, 'хуже −70 дБм') +
+      k('Получено', bytes(R.reduce((a, r) => a + r.d, 0)).replace(/ (\S+)$/, '<small>$1</small>'), `за ${rangeFor(this.range)}`) +
+      k('Отправлено', bytes(R.reduce((a, r) => a + r.u, 0)).replace(/ (\S+)$/, '<small>$1</small>'), `за ${rangeFor(this.range)}`);
+  }
+  renderTab() {
+    const cols = [{ k: 'n', label: 'Хостнейм' }, { k: 'ipk', label: 'IP' }, { k: 'm', label: 'MAC', cls: 'hide-sm' }, { k: 'how', label: 'Подключение' },
+      { k: 'sig', label: 'Сигнал', n: 1, title: 'уровень сигнала Wi-Fi, дБм (ближе к 0 — лучше)' }, { k: 'tx', label: 'Канал ↓', n: 1, title: 'скорость канала к устройству, Мбит/с', cls: 'hide-sm' }, { k: 'rx', label: 'Канал ↑', n: 1, title: 'скорость канала от устройства, Мбит/с', cls: 'hide-sm' },
+      { k: 'ct', label: 'В сети', n: 1, title: 'сколько подключено к этой точке доступа' }, { k: 'inact', label: 'Простой', n: 1, title: 'сколько не передавало данных', cls: 'hide-sm' },
+      { k: 'd', label: '↓ Получено', n: 1, title: 'из интернета за период' }, { k: 'u', label: '↑ Отправлено', n: 1, title: 'в интернет за период' }];
+    const sc = s => s == null ? '' : s >= -60 ? 'sig-good' : s >= -70 ? 'sig-warn' : 'sig-bad';
+    const ag = s => s == null ? '—' : s < 60 ? `${Math.round(s)} с` : dur(s);
+    const t = $('#c-tab', this.m);
+    $('#c-cnt', this.m).textContent = `${this.rows.length} ${plural(this.rows.length, 'устройство', 'устройства', 'устройств')} · щелчок по заголовку — сортировка`;
+    t.innerHTML = thead(cols, this.sort) + (sortRows(this.rows, this.sort.k, this.sort.asc).map(r => `<tr>
+      <td><span class="pname">${esc(r.n)}</span></td><td class="mono" style="white-space:nowrap">${esc(r.ip)}</td><td class="mono hide-sm muted" style="white-space:nowrap">${esc(r.m)}</td>
+      <td class="role" title="${esc(r.ifn)}">${esc(r.how)}</td>
+      <td class="n ${sc(r.sig)}">${r.sig == null ? '—' : r.sig + ' дБм'}</td><td class="n hide-sm">${r.tx == null ? '—' : f1(r.tx)}</td><td class="n hide-sm">${r.rx == null ? '—' : f1(r.rx)}</td>
+      <td class="n">${ag(r.ct)}</td><td class="n hide-sm">${ag(r.inact)}</td><td class="n">${bytes(r.d)}</td><td class="n">${bytes(r.u)}</td></tr>`).join('')
+      || `<tr><td colspan="11" class="empty">К этому роутеру сейчас никто не подключён</td></tr>`);
+    bindSort(t, this.sort, () => { lsSet('rmon.csort', this.sort); this.renderTab(); });
+  }
+}
+
+// ================= Процесс =================
+class ProcView {
+  constructor(m, r) {
+    this.m = m; this.ip = r.ip; this.pid = r.pid; this.st = r.st; this.tsort = { k: 'cpu', asc: false };
+    crumbs([{ label: r.ip, href: hostHref(r.ip) }, { label: 'PID ' + r.pid }]);
+    setHelp('<div><b>Процесс</b></div><div>CPU и память процесса за последний час, его потоки (загрузка замеряется за 1 с), открытые порты и соединения. CPU — в % всей мощности роутера.</div>');
+    m.innerHTML = `<div id="p-banner"></div>
+      <div class="panel-h" style="margin-bottom:var(--gap)"><div style="min-width:0"><h1 id="p-name">PID ${esc(r.pid)}</h1><div class="sub" id="p-sub"></div></div></div>
+      <div class="panel" style="margin-bottom:var(--gap)" id="p-kpip"><div class="kpis" id="p-kpis"></div></div>
+      <div class="grid g-eq" id="p-charts">
+        <div class="panel"><div class="panel-h"><h2>CPU за час, %</h2><span class="muted" style="font-size:12px">% всей мощности роутера</span></div><div id="pc-cpu"></div></div>
+        <div class="panel"><div class="panel-h"><h2>Память (RSS) за час, МБ</h2></div><div id="pc-rss"></div></div>
+      </div>
+      <div class="grid g-eq section" id="p-sec1">
+        <div class="panel"><div class="panel-h"><h2>Сведения</h2></div><dl class="kv" id="p-kv"></dl></div>
+        <div class="panel"><div class="panel-h"><h2>Память процесса</h2></div><dl class="kv" id="p-mem"></dl></div>
+      </div>
+      <div class="grid g-eq section" id="p-sec2">
+        <div class="panel"><div class="panel-h"><h2>Потоки</h2><span class="muted" style="font-size:12px">CPU за 1 с замера</span></div><div class="tbl-wrap"><table id="p-thr"></table></div></div>
+        <div class="panel"><div class="panel-h"><h2>Сеть и связи</h2></div><div id="p-net"></div></div>
+      </div>`;
+    this.ch = { cpu: new Chart($('#pc-cpu', m), { tipFmt: pct }), rss: new Chart($('#pc-rss', m), { fmt: v => v >= 10 ? Math.round(v) + '' : (+v).toFixed(1).replace('.', ','), tipFmt: mb }) };
+  }
+  async refresh() {
+    const j = await api(this.ip, `a=proc&pid=${encodeURIComponent(this.pid)}&st=${encodeURIComponent(this.st)}`); this.j = j;
+    const H = j.hist, nm = (j.status && j.status.Name) || H.name || 'PID ' + j.pid;
+    crumbs([{ label: j.name || this.ip, href: hostHref(this.ip) }, { label: `${nm} (${j.pid})` }]);
+    document.title = `${nm} · ${j.name} · Мониторинг роутера`;
+    $('#p-name', this.m).textContent = nm;
+    // завершившийся процесс: показываем только то, что о нём известно, без пустых блоков и прочерков
+    const hasH = H.t.length > 0, show = (id, on) => { $(id, this.m).style.display = on ? '' : 'none'; };
+    show('#p-kpip', j.alive || hasH); show('#p-charts', j.alive || H.t.length > 1);
+    show('#p-sec1', j.alive); show('#p-sec2', j.alive);
+    const back = `<a href="${hostHref(this.ip)}">К процессам роутера</a>`;
+    $('#p-banner', this.m).innerHTML = j.alive ? '' : `<div class="banner">${ICON.serious}<span>${hasH
+      ? `Процесс завершился. Ниже — его нагрузка за последний час, пока он работал (виден последний раз в ${hhmm(last(H.t))}). ${back}`
+      : `Процесс завершился, и данных о нём за последний час нет: он работал меньше 10 секунд или закончился больше часа назад. ${back}`}</span></div>`;
+    if (!j.alive) {
+      if (hasH) this.stop = true;   // данные завершившегося процесса больше не изменятся — автообновление не нужно
+      $('#p-sub', this.m).textContent = `PID ${j.pid} · ${j.name} · завершён`;
+      if (!hasH) return;
+    }
+    const cpu = H.cpu, rssMB = H.rss.map(x => x / 1024);
+    const avg = cpu.length ? cpu.reduce((a, b) => a + b, 0) / cpu.length : null;
+    const st = j.status || {};
+    const rssNow = j.alive ? parseInt(st.VmRSS) : last(H.rss);
+    $('#p-sub', this.m).innerHTML = j.alive
+      ? `PID ${j.pid} · ${esc(j.name)} · пользователь <b>${esc(j.user || j.uid)}</b> · ${esc(STATE[(st.State || '')[0]] || st.State || '')} · запущен ${esc(dt(j.started))} (${dur(j.now - j.started)} назад)`
+      : `PID ${j.pid} · ${esc(j.name)} · завершён`;
+    const k = (l, v, s = '') => `<div class="kpi"><div class="l">${l}</div><div class="v num">${v}</div><div class="s">${s}</div></div>`;
+    const u = s => { const m = String(s).match(/^(\S+)\s(.*)$/); return m ? `${m[1]}<small>${m[2]}</small>` : s; };
+    const drss = H.rss.length ? last(H.rss) - H.rss[0] : 0;
+    const span = (last(H.t) || 0) - (H.t[0] || 0);
+    if (!j.alive) {
+      $('#p-kpis', this.m).innerHTML =
+        k('CPU средн.', u(pct(avg).replace('%', ' %')), 'пока работал') +
+        k('CPU пик', u(pct(Math.max(...cpu)).replace('%', ' %')), 'максимум за 10 с') +
+        k('Память (RSS)', u(kb(last(H.rss))), 'перед завершением') +
+        k('Наблюдался', esc(span > 0 ? dur(span + 10) : '≈ 10 с'), `до ${hhmmss(last(H.t))}`);
+    } else $('#p-kpis', this.m).innerHTML =
+      k('CPU 10 с', u(pct(last(cpu)).replace('%', ' %')), `пик за час ${pct(cpu.length ? Math.max(...cpu) : null)}`) +
+      k('CPU средн.', u(pct(avg).replace('%', ' %')), span > 0 ? `за ${dur(span)} наблюдений` : 'данные копятся') +
+      k('Память (RSS)', u(kb(rssNow)), drss ? `за час ${drss > 0 ? '+' : '−'}${kb(Math.abs(drss))}` : 'за час без изменений') +
+      (j.alive ? k('В swap', u(kb(parseInt(st.VmSwap) || 0)), 'VmSwap') + k('Потоки', st.Threads || '—', '') + k('Файлы', j.fds, 'открытых дескрипторов') +
+        k('Соединения', j.conns, `слушает портов: ${j.sockets.length}`) + k('OOM score', j.oom, 'кого ядро убьёт первым при нехватке памяти') : '');
+    this.ch.cpu.set(H.t, [{ name: 'CPU', color: 'var(--s1)', v: cpu }]);
+    this.ch.rss.set(H.t, [{ name: 'RSS', color: 'var(--s2)', v: rssMB }]);
+    // сведения
+    const ppid = j.alive ? st.PPid : H.ppid;
+    const kids = (j.children || []).map(c => `<a class="chip" href="${procHref(this.ip, c.pid, c.st)}">${esc(c.name)} ${c.pid}</a>`).join('');
+    $('#p-kv', this.m).innerHTML = j.alive ? `
+      <dt>Команда</dt><dd class="mono">${esc(j.cmd || '[поток ядра]')}</dd>
+      <dt>Файл</dt><dd class="mono">${esc(j.exe || '—')}</dd>
+      <dt>Рабочая папка</dt><dd class="mono">${esc(j.cwd || '—')}</dd>
+      <dt>Родитель</dt><dd>${+ppid > 0 ? `<a href="${procHref(this.ip, ppid, '')}">PID ${esc(ppid)}</a>` : '—'}</dd>
+      <dt>Дочерние</dt><dd>${kids ? `<div class="chips">${kids}</div>` : 'нет'}</dd>
+      <dt>Переключения</dt><dd class="num">${esc(st.voluntary_ctxt_switches)} добровольных, ${esc(st.nonvoluntary_ctxt_switches)} вытеснений</dd>` :
+      `<dt>Родитель</dt><dd>${+ppid > 0 ? `<a href="${procHref(this.ip, ppid, '')}">PID ${esc(ppid)}</a>` : '—'}</dd>`;
+    const memRows = [['VmRSS', 'Физическая память (RSS)'], ['RssAnon', '— своя (heap, стек)'], ['RssFile', '— файлы и библиотеки'], ['RssShmem', '— общая'], ['VmSwap', 'Вытеснено в swap'], ['VmPeak', 'Пик виртуальной'], ['VmSize', 'Виртуальная'], ['VmData', 'Данные'], ['VmLib', 'Библиотеки']];
+    $('#p-mem', this.m).innerHTML = j.alive ? memRows.filter(([key]) => st[key]).map(([key, l]) => `<dt>${l}</dt><dd class="num">${esc(kb(parseInt(st[key])))}</dd>`).join('') : '<dd class="muted">процесс завершён</dd>';
+    // потоки
+    const th = (j.threads || []).map(x => ({ ...x }));
+    const t = $('#p-thr', this.m);
+    if (!th.length) t.innerHTML = `<tr><td class="empty">${j.alive ? 'Нет данных' : 'Процесс завершён'}</td></tr>`;
+    else {
+      const render = () => {
+        t.innerHTML = thead([{ k: 'name', label: 'Поток' }, { k: 'tid', label: 'TID', n: 1 }, { k: 'cpu', label: 'CPU', n: 1 }, { k: 'ticks', label: 'CPU всего', n: 1, title: 'процессорное время с запуска' }, { k: 'state', label: 'Сост.' }], this.tsort) +
+          sortRows(th, this.tsort.k, this.tsort.asc).map(x => `<tr><td>${esc(x.name)}</td><td class="n">${x.tid}</td><td class="n">${cpuCell(x.cpu)}</td><td class="n">${dur(x.ticks / 100)}</td><td title="${esc(STATE[x.state] || '')}">${esc(x.state)}</td></tr>`).join('');
+        bindSort(t, this.tsort, render);
+      };
+      render();
+    }
+    $('#p-net', this.m).innerHTML = !j.alive ? '<div class="empty">Процесс завершён</div>' :
+      `<dl class="kv"><dt>Установленных TCP</dt><dd class="num">${j.conns}</dd><dt>Слушает</dt><dd>${j.sockets.length ? `<div class="chips">${j.sockets.map(s => `<span class="chip mono">${esc(s.proto)} ${esc(s.addr)}</span>`).join('')}</div>` : 'ничего'}</dd></dl>`;
+  }
+}
+
+// ================= Мастер «Добавить роутер» =================
+function addRouterWizard(onDone, ip0) {
+  const dlg = document.createElement('dialog'); dlg.className = 'modal'; document.body.appendChild(dlg);
+  const S = { step: 'ip', ip: ip0 || '', c: null, err: '', busy: false, pw: '', ok: {}, persist: false, res: null };
+  let changed = false;
+  const close = () => { dlg.close(); dlg.remove(); if (changed) onDone(); };
+  dlg.addEventListener('cancel', e => { if (S.busy) e.preventDefault(); else { e.preventDefault(); close(); } });
+  const msg = (lvl, html) => `<div class="msg">${ICON[lvl]}<div>${html}</div></div>`;
+  const yes = (v, a, b) => v ? `${ICON.good}<span>${a}</span>` : `${ICON.critical}<span>${b}</span>`;
+
+  function body() {
+    const c = S.c, ip = esc(S.ip);
+    let h = `<div><label for="w-ip" style="font-size:13px;color:var(--ink-2)">IP-адрес роутера в локальной сети${lanInfo.lan ? ` (${esc(lanInfo.lan)})` : ''}</label>
+      <div class="row2" style="margin-top:4px"><input type="text" id="w-ip" inputmode="decimal" placeholder="например ${esc(ipExample())}" value="${ip}" ${S.step !== 'ip' && S.step !== 'checked' ? 'disabled' : ''}><button class="btn" id="w-check" ${S.busy || S.step === 'done' ? 'disabled' : ''}>Проверить</button></div></div>`;
+    if (S.err) h += msg('critical', esc(S.err));
+    if (!c) return h + `<p class="muted" style="margin:0;font-size:13px">Сначала проверю, отвечает ли роутер, есть ли на нём SSH и не стоит ли уже RouterMon. Проверка ничего не меняет.</p>`;
+
+    const hostN = `<b>${esc(c.host)}</b> (${esc(c.hostip)})`;
+    h += `<div class="checks">${yes(c.ping || c.ssh, 'отвечает в сети', 'не отвечает на ping')}${yes(c.ssh, 'SSH работает' + (c.banner ? ` <span class="muted mono">${esc(c.banner)}</span>` : ''), 'SSH (порт 22) не отвечает')}
+      ${c.rmon ? `${ICON.good}<span>RouterMon уже установлен</span>` : `${ICON.warning}<span>RouterMon не установлен</span>`}
+      ${c.key ? `${ICON.good}<span>${esc(c.host)} уже может войти по ключу — пароль не нужен</span>` : ''}</div>`;
+    if (S.step === 'done') {
+      const r = S.res;
+      h += r.result === 'installed' ? msg('good', `RouterMon установлен на ${ip} и роутер добавлен в список. Через 20–30 секунд появятся первые графики.`) : msg('good', `${ip} добавлен в список роутеров.`);
+      if (r.log) h += `<details><summary class="muted" style="font-size:12px;cursor:pointer">Журнал установки</summary><div class="msg"><pre>${esc(r.log)}</pre></div></details>`;
+      return h;
+    }
+    if (c.rmon) {
+      return h + `<div class="access"><h3>Добавить в список</h3>
+        <p><b>Что:</b> адрес ${ip} будет записан в список роутеров на ${hostN} (файл /etc/rmon-web/routers.conf). Так ${ip} будет виден на главной, даже если его нет в ARP-таблице.</p>
+        <p><b>Доступы:</b> не нужны — на ${ip} ничего не меняется.</p></div>`;
+    }
+    if (!c.ssh) {
+      return h + msg('critical', `На ${ip} не отвечает SSH. Поставить RouterMon можно только на роутер с OpenWrt, где включён SSH (в LuCI: Система → Администрирование → SSH-доступ). Если это роутер с другой прошивкой, RouterMon на него не встанет.`);
+    }
+    const lan = esc(c.lan || lanInfo.lan || 'локальной сети');
+    h += `<p style="margin:0;font-size:13px">Чтобы показывать нагрузку ${ip}, на нём нужно поставить RouterMon. Установку выполнит роутер ${hostN}. Прочитайте, какие доступы для этого нужны, и отметьте согласие.</p>`;
+    h += `<div class="access"><h3>1. Однократный вход на ${ip} под root по SSH</h3>
+      <p><b>Что:</b> ${hostN} один раз подключится к ${ip} по SSH под учётной записью root ${c.key ? 'по уже настроенному ключу' : 'с паролем, который вы введёте ниже'}.</p>
+      <p><b>Зачем:</b> скопировать файлы RouterMon и включить его службу. На OpenWrt это можно сделать только с правами root.</p>
+      <div class="risk"><p><b>Риски:</b></p><ul>
+        ${c.key ? '' : `<li>Пароль идёт от браузера к ${esc(c.host)} по обычному HTTP, без шифрования. Его может перехватить тот, кто прослушивает вашу локальную сеть. Вводите пароль только в доверенной домашней сети; если сомневаетесь, смените пароль root на ${ip} после установки.</li>
+        <li>Пароль нигде не сохраняется: он нужен только на время установки и сразу забывается.</li>`}
+        <li>При первом подключении ${esc(c.host)} запоминает ключ SSH-сервера ${ip} без проверки. Если в сети кто-то подменяет адреса, соединение может уйти к нему.</li>
+        <li>У root полные права на роутере. Установщик меняет только то, что перечислено в пункте 2, и сначала проверяет, что это OpenWrt с веб-сервером uhttpd и что хватает места.</li></ul></div>
+      ${c.key ? '' : `<input type="password" id="w-pw" placeholder="пароль root на ${ip}" autocomplete="off" value="${esc(S.pw)}">`}
+      <label class="ok"><input type="checkbox" data-ok="ssh" ${S.ok.ssh ? 'checked' : ''}> Понимаю и разрешаю вход на ${ip} под root</label></div>`;
+    h += `<div class="access"><h3>2. Что изменится на ${ip}</h3><ul>
+        <li>Появятся папка <span class="mono">/etc/rmon-web</span> (около 150 КБ флеш-памяти) и служба <span class="mono">/etc/init.d/rmon</span>. Оба пути добавляются в <span class="mono">/etc/sysupgrade.conf</span>, чтобы пережить обновление прошивки.</li>
+        <li>В настройки uhttpd добавится отдельный веб-сервер на порту 8089. Веб-интерфейс LuCI при этом перезапустится и на 2–3 секунды станет недоступен.</li>
+        <li>Служба раз в 10 секунд читает данные о системе и процессах: около 1% CPU и до 4 МБ оперативной памяти.</li>
+        <li>В список роутеров на ${ip} будет записан ${esc(c.hostip)}, чтобы роутеры видели друг друга.</li></ul>
+      <div class="risk"><p><b>Риски:</b></p><ul>
+        <li>Страница RouterMon открывается без пароля. Любое устройство в сети ${lan} сможет видеть нагрузку ${ip}, список его процессов и их командные строки. Если какая-то программа получает пароль или токен прямо в командной строке, его тоже будет видно.</li>
+        <li>Порт 8089 открыт только для локальной сети. API умеет лишь читать данные: остановить процесс или изменить настройки через него нельзя.</li></ul></div>
+      <p>Убрать всё: <span class="mono">install.ps1 -Hosts ${ip} -Uninstall</span> с ПК или <span class="mono">sh /etc/rmon-web/lib/setup.sh remove</span> на самом роутере.</p>
+      <label class="ok"><input type="checkbox" data-ok="chg" ${S.ok.chg ? 'checked' : ''}> Согласен на эти изменения</label></div>`;
+    if (!c.key) h += `<div class="access"><h3>3. Постоянный доступ ${esc(c.host)} → ${ip} по ключу <span class="opt">необязательно</span></h3>
+      <p><b>Что:</b> открытый ключ роутера ${hostN} будет добавлен в <span class="mono">/etc/dropbear/authorized_keys</span> на ${ip}.</p>
+      <p><b>Зачем:</b> чтобы потом переустанавливать или обновлять RouterMon на ${ip} отсюда без пароля.</p>
+      <div class="risk"><p><b>Риск:</b> тот, кто получит контроль над ${esc(c.host)}, сможет без пароля войти на ${ip} под root. Отозвать доступ: удалить строку с ключом <span class="mono">id_rmon</span> роутера ${esc(c.host)} из этого файла на ${ip}.</p></div>
+      <label class="ok"><input type="checkbox" id="w-persist" ${S.persist ? 'checked' : ''}> Разрешить постоянный доступ по ключу</label></div>`;
+    if (S.busy) h += msg('warning', 'Устанавливаю… Это занимает до минуты, не закрывайте окно.');
+    return h;
+  }
+  function canGo() {
+    const c = S.c; if (!c || S.busy) return false;
+    if (S.step === 'done') return true;
+    if (c.rmon) return true;
+    if (!c.ssh) return false;
+    return S.ok.ssh && S.ok.chg && (c.key || S.pw.length > 0);
+  }
+  function render() {
+    const c = S.c;
+    // «Проверить» — только рядом с полем IP; основная кнопка внизу появляется, когда есть что делать
+    const label = S.step === 'done' ? 'Готово' : !c ? '' : c.rmon ? 'Добавить в список' : c.ssh ? 'Установить и добавить' : '';
+    dlg.innerHTML = `<div class="mh"><h2>Добавить роутер</h2><span class="spacer"></span><button class="btn" id="w-x" ${S.busy ? 'disabled' : ''} aria-label="Закрыть">✕</button></div>
+      <div class="mb">${body()}</div>
+      <div class="mf">${S.step === 'done' ? '' : `<button class="btn" id="w-cancel" ${S.busy ? 'disabled' : ''}>Отмена</button>`}${label ? `<button class="btn primary" id="w-go" ${canGo() ? '' : 'disabled'}>${label}</button>` : ''}</div>`;
+    const ipEl = $('#w-ip', dlg);
+    ipEl.oninput = () => { S.ip = ipEl.value.trim(); };
+    ipEl.onkeydown = e => { if (e.key === 'Enter') check(); };
+    $('#w-check', dlg).onclick = check;
+    $('#w-x', dlg).onclick = close;
+    const cn = $('#w-cancel', dlg); if (cn) cn.onclick = close;
+    const go = $('#w-go', dlg); if (go) go.onclick = () => S.step === 'done' ? close() : install();
+    const upd = () => { if (go) go.disabled = !canGo(); };
+    const pw = $('#w-pw', dlg); if (pw) pw.oninput = () => { S.pw = pw.value; upd(); };
+    dlg.querySelectorAll('[data-ok]').forEach(x => x.onchange = () => { S.ok[x.dataset.ok] = x.checked; upd(); });
+    const ps = $('#w-persist', dlg); if (ps) ps.onchange = () => { S.persist = ps.checked; };
+  }
+  async function check() {
+    S.ip = ($('#w-ip', dlg).value || '').trim(); S.err = ''; S.c = null; S.ok = {}; S.step = 'ip';
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(S.ip)) { S.err = 'Введите IP-адрес вида 192.168.1.10'; render(); return; }
+    S.busy = true; render(); $('#w-check', dlg).textContent = 'Проверяю…';
+    try { S.c = await api('', 'a=check&ip=' + encodeURIComponent(S.ip)); S.step = 'checked'; }
+    catch (e) { S.err = e.message; }
+    S.busy = false; render();
+  }
+  async function install() {
+    S.busy = true; S.err = ''; render();
+    try {
+      S.res = await post('a=add', { ip: S.ip, password: S.c.rmon || S.c.key ? '' : S.pw, persist: !S.c.key && S.persist });
+      S.step = 'done'; changed = true;
+    } catch (e) { S.err = e.message; }
+    S.pw = ''; S.busy = false; render();
+  }
+  // IP введён в выпадающем списке — сразу проверяем, как по кнопке «Проверить»
+  render(); dlg.showModal(); if (S.ip) check(); else setTimeout(() => $('#w-ip', dlg).focus(), 0);
+}
+
+go();
+</script>
+</body>
+</html>

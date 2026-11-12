@@ -1,0 +1,12 @@
+# в репозиторий попадает только сам RouterMon: установщики, web/, документация, лицензия
+*
+!.gitignore
+!.gitattributes
+!README.md
+!INSTALL.md
+!LICENSE
+!install.cmd
+!install.ps1
+!install.sh
+!web/
+!web/**

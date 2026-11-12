@@ -1,0 +1,8 @@
+# скрипты для роутера и установщик для Linux/macOS — только с переводами строк LF (иначе sh на роутере не поймёт)
+* text=auto eol=lf
+web/** text eol=lf
+web/cgi-bin/api text eol=lf
+*.sh text eol=lf
+# Windows-установщики — CRLF
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
