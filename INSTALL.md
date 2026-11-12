@@ -101,5 +101,5 @@ sh /etc/rmon-web/lib/setup.sh remove            # на самом роутере
 | `это не OpenWrt` | RouterMon работает только на OpenWrt |
 | `нет веб-сервера uhttpd` | `opkg update && opkg install uhttpd` (или `apk add uhttpd` на OpenWrt 25+) |
 | `порт 8089 уже занят` | `.\install.ps1 -Hosts <IP> -Port 8090` |
-| `осталось N КБ флеш-памяти` | освободите место на роутере (нужно ~400 КБ) |
+| `осталось N KB флеш-памяти` | освободите место на роутере (нужно больше 400 KB) |
 | Windows: «выполнение сценариев отключено» | запускайте `install.cmd`, а не `install.ps1` |
