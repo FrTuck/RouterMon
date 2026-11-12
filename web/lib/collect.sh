@@ -13,14 +13,14 @@ T=$(printf '\t')
 NCPU=$(grep -c '^processor' /proc/cpuinfo); [ "$NCPU" -gt 0 ] || NCPU=1
 n=0
 
-# подпись датчика Wi-Fi: диапазон радиомодуля (2,4 / 5 / 6 ГГц) по первой частоте его phy, иначе имя датчика
+# подпись датчика Wi-Fi: диапазон радиомодуля (2,4 / 5 / 6 GHz) по первой частоте его phy, иначе имя датчика
 wband() {
   ph=$(readlink "$1/device" 2>/dev/null); ph=${ph##*/}
   f=$(iw phy "$ph" info 2>/dev/null | grep -m1 -oE '\* [0-9]+(\.[0-9]+)? MHz' | grep -oE '[0-9]+' | head -n1)
-  case "$f" in 24[0-9][0-9]) echo '2,4 ГГц' ;; 5[0-8][0-9][0-9]|59[0-2][0-9]) echo '5 ГГц' ;; 59[3-9][0-9]|6*|7*) echo '6 ГГц' ;; *) echo "$2" ;; esac
+  case "$f" in 24[0-9][0-9]) echo '2,4 GHz' ;; 5[0-8][0-9][0-9]|59[0-2][0-9]) echo '5 GHz' ;; 59[3-9][0-9]|6*|7*) echo '6 GHz' ;; *) echo "$2" ;; esac
 }
-# Датчики одного радиочипа (2,4 и 5 ГГц на одном чипе, как у MT7981) показывают одну и ту же температуру —
-# такие сливаются в один с подписью «2,4 + 5 ГГц»; отдельными остаются только датчики разных чипов.
+# Датчики одного радиочипа (2,4 и 5 GHz на одном чипе, как у MT7981) показывают одну и ту же температуру —
+# такие сливаются в один с подписью «2,4 + 5 GHz»; отдельными остаются только датчики разных чипов.
 WB=$(for h in /sys/class/hwmon/hwmon*; do
   nm=; read nm <"$h/name" 2>/dev/null
   case "$nm" in *cpu*|'') continue ;; esac
@@ -28,7 +28,7 @@ WB=$(for h in /sys/class/hwmon/hwmon*; do
   chip=$(readlink -f "/sys/class/ieee80211/$ph/device" 2>/dev/null); [ -n "$chip" ] || chip=$h
   printf '%s\t%s\t%s\n' "$chip" "$h" "$(wband "$h" "$nm")"
 done | awk -F'\t' '{ if (!($1 in H)) { H[$1] = $2; o[++n] = $1; L[$1] = $3 } else L[$1] = L[$1] " + " $3 }
-  END { for (i = 1; i <= n; i++) { l = L[o[i]]; gsub(/ ГГц \+ /, " + ", l); printf "%s\t%s\n", H[o[i]], l } }')
+  END { for (i = 1; i <= n; i++) { l = L[o[i]]; gsub(/ GHz \+ /, " + ", l); printf "%s\t%s\n", H[o[i]], l } }')
 WB="$WB
 "
 
@@ -95,9 +95,11 @@ traffic() {
       if (b1 < 0 || b2 < 0 || (key in seen)) next
       seen[key] = 1; printf "%s\t%.0f\t%.0f\t0\n", key, b1, b2 > PN
       if (key in po) { du = b1 - po[key]; dd = b2 - pr[key]; if (du < 0 || dd < 0) { du = b1; dd = b2 } } else { du = b1; dd = b2 }
-      # у аппаратно ускоренных соединений (HW_OFFLOAD) ядро иногда скачком прибавляет к счётчику ровно 2^32;
-      # за 10 с столько пройти не может — такой скачок отбрасываем
-      while (du >= 4294967296) du -= 4294967296; while (dd >= 4294967296) dd -= 4294967296
+      # у аппаратно ускоренных соединений (HW_OFFLOAD) ядро иногда скачком прибавляет к счётчику 2^32 (бывает и
+      # чуть меньше — часть скачка приходится на соседний замер). За 10 s даже на 1 Гбит/с проходит ~1,25 GB,
+      # поэтому прирост от 2^32 − 64 MB считается скачком: вычитаем 2^32, отрицательный остаток — ноль
+      while (du >= 4227858432) du -= 4294967296; while (dd >= 4227858432) dd -= 4294967296
+      if (du < 0) du = 0; if (dd < 0) dd = 0
       if (first || du + dd <= 0) next
       if (!priv(s1) && !mine(s1)) { r = s1; c = s2; up = dd; dn = du }   # входящее из интернета (проброс порта, торрент)
       else { r = d1; c = s1; up = du; dn = dd }
@@ -147,12 +149,14 @@ while :; do
     if (nm != "lo" && (f[1] + f[9]) > 0) printf "%s\t%s\t%.0f\t%.0f\n", ts, nm, f[1], f[9] }' /proc/net/dev >"$D/net.now"
   cat "$D/net.now" >>"$D/net.tsv"
 
-  # процессы: pid, ppid, тики CPU (utime+stime), RSS кБ, потоки, состояние, starttime, имя
+  # процессы: pid, ppid, тики CPU, RSS кБ, потоки, состояние, starttime, имя.
+  # Тики CPU = свои (utime+stime) + завершившихся дочерних (cutime+cstime): короткоживущие процессы (CGI-запросы
+  # к веб-серверу, awk в скриптах) живут меньше 10 s и в снимок не попадают — их CPU засчитывается родителю
   {
     printf '#\t%s\n' "$up"
     cd /proc && cat [0-9]*/stat 2>/dev/null | awk '{ c = $0; sub(/^[0-9]+ \(/, "", c); sub(/\) [A-Za-z] .*/, "", c); gsub(/\t/, " ", c)
       r = $0; sub(/.*\) /, "", r); split(r, f, " ")
-      printf "%s\t%s\t%d\t%d\t%d\t%s\t%s\t%s\n", $1, f[2], f[12] + f[13], f[22] * 4, f[18], f[1], f[20], c }'
+      printf "%s\t%s\t%d\t%d\t%d\t%s\t%s\t%s\n", $1, f[2], f[12] + f[13] + f[14] + f[15], f[22] * 4, f[18], f[1], f[20], c }'
   } >"$P/$ts.tmp" && mv "$P/$ts.tmp" "$P/$ts"
   cd /
 

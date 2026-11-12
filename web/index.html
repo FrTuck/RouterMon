@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Мониторинг роутера</title>
+<!-- значок вкладки: циферблат (тот же рисунок — web/favicon.svg) -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='31' fill='%23c8c8c8'/%3E%3Ccircle cx='32' cy='32' r='27.5' fill='%23fff'/%3E%3Cg fill='none' stroke-width='9'%3E%3Cpath d='M16.44 47.56A22 22 0 1 1 52.33 23.58' stroke='%23109618'/%3E%3Cpath d='M52.33 23.58A22 22 0 0 1 52.92 38.8' stroke='%23ff9900'/%3E%3Cpath d='M52.92 38.8A22 22 0 0 1 47.56 47.56' stroke='%23dc3912'/%3E%3C/g%3E%3Cpath d='M37.6 8.66L34.4 32.6L30.6 37.83L29.6 31.4Z' fill='%23e8734f' stroke='%23b8442a' stroke-width='.8' stroke-linejoin='round'/%3E%3Ccircle cx='32' cy='32' r='5.6' fill='%234a86e8' stroke='%233a6cc0' stroke-width='.8'/%3E%3C/svg%3E">
 <style>
 :root {
   color-scheme: light;
@@ -55,6 +57,18 @@ header { position: sticky; top: 0; z-index: 5; background: var(--page); border-b
 .help .gtip { left: 0; transform: none; top: 26px; width: max-content; max-width: min(420px, 86vw); }
 .help .qbtn:hover + .gtip, .help .qbtn:focus-visible + .gtip, .help.open .gtip { display: block; }
 .help .gtip b { color: var(--ink); }
+.th-help { margin-left: 5px; vertical-align: middle; }
+.th-help .qbtn { width: 15px; height: 15px; font-size: 9px; line-height: 13px; }
+.th-help .gtip { position: fixed; top: 0; left: 0; transform: none; max-width: min(560px, 92vw); white-space: normal; font-weight: 400; text-align: left; cursor: default; }
+.th-help.open .gtip { display: block; }
+.st-tab { margin: 6px 0; width: 100%; }
+.st-tab th, .st-tab td { position: static; padding: 3px 8px 3px 0; font-size: 12px; text-align: left; white-space: normal; background: none; vertical-align: top; }
+.st-tab td:first-child { font-family: var(--mono, monospace); font-weight: 700; }
+.st-tab tr.bad td:first-child { color: var(--critical); }
+.st-bad { color: var(--critical); font-weight: 700; }
+/* «Процессы»: всё по центру, кроме имени процесса; CPU 10 s — полоска слева, число справа */
+#ptab th, #ptab td { text-align: center; }
+#ptab td:first-child, #ptab .st-tab th, #ptab .st-tab td { text-align: left; }
 .crumbs { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; color: var(--ink-2); min-width: 0; }
 .crumbs .sep { color: var(--muted); }
 .crumbs b { color: var(--ink); font-weight: 600; }
@@ -110,6 +124,11 @@ h2 { font-size: 15px; margin: 0; font-weight: 600; }
 .section { margin-top: var(--gap); }
 /* «Интерфейсы» + «Топ адресов»: по той же сетке, что графики над ними; при трёх колонках топ занимает две */
 .g-12 { align-items: start; }
+/* «Обзор»: порядок окон фиксирован; «Интерфейсы» всегда под «Сетью» (они связаны выбором интерфейса) */
+.g-ov { grid-template-columns: minmax(0, 1fr); grid-template-areas: "cpu" "mem" "temp" "net" "ifs" "swap" "load" "top"; }
+@media (min-width: 1086px) { .g-ov { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "cpu mem" "temp swap" "net load" "ifs top"; } }
+@media (min-width: 1620px) { .g-ov { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "cpu mem temp" "net swap load" "ifs top top"; } }
+.g-ov > .ov-low { align-self: start; }
 /* два равных окна на всю ширину (графики приёма и передачи, окна процесса); на узком экране — одно под другим */
 .g-eq { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 900px) { .g-eq { grid-template-columns: minmax(0, 1fr); } }
@@ -121,13 +140,21 @@ h2 { font-size: 15px; margin: 0; font-weight: 600; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 7px; vertical-align: -1px; }
 .vol { display: inline-block; width: 40px; height: 6px; background: var(--surface-2); border-radius: 3px; vertical-align: middle; margin-right: 6px; overflow: hidden; }
 .vol i { display: block; height: 100%; border-radius: 3px; }
+/* полоска + число: число фиксированной ширины, поэтому у всех строк полоски начинаются в одной точке */
+.volc { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; vertical-align: middle; }
+.volc > span:last-child { min-width: 4.6em; text-align: right; }
+.volc .vol, .volc .cpubar { margin-right: 0; flex: none; }
+.vol .vb { display: flex; height: 100%; border-radius: 3px; overflow: hidden; }
+.vol .vb i { border-radius: 0; flex: none; }
+/* таблицы с полосками объёма: заголовки показателей и ячейки с полосками — по центру */
+.vt th.n, .vt td.vc { text-align: center; }
 td.ck { width: 26px; padding-right: 0; }
 td.ck input { margin: 0; cursor: pointer; }
 .role { color: var(--ink-2); font-size: 12.5px; white-space: nowrap; }
 #td-tab th, #td-tab td { padding-left: 4px; padding-right: 4px; }
 /* верхняя строка показателей — равномерно по всей ширине; на телефоне — по два в ряд */
 .kpis.even { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px 24px; }
-.kpis.even .kpi { min-width: 0; }
+.kpis.even .kpi { min-width: 0; flex: 1 1 auto; text-align: center; }
 .kpis.even .kpi .s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 640px) { .kpis.even { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 a.kpi { color: inherit; border-radius: 8px; margin: -4px -6px; padding: 4px 6px; }
@@ -234,7 +261,19 @@ th.sort:hover { color: var(--ink); }
 th.on::after { content: " ▾"; }
 th.on.asc::after { content: " ▴"; }
 td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* шапки всех таблиц — по центру ячеек (кроме таблицы внутри справки «?») */
+table th, table th.n { text-align: center; }
 tr.click { cursor: pointer; }
+/* «Самые ресурсоёмкие процессы в сети»: строки одного роутера — группа, имя роутера — одна ячейка на группу */
+#nettop .rt-cell { vertical-align: top; font-weight: 600; white-space: nowrap; border-right: 1px solid var(--grid); }
+#nettop tr.grp-first td { border-top: 2px solid var(--grid); }
+/* значения — по центру под заголовками; CPU — блок «полоска + число» фиксированной ширины, тоже по центру,
+   поэтому полоски всех строк начинаются в одной точке */
+#nettop td.n { text-align: center; }
+/* «Интерфейсы» (вкладки «Трафик» и «Обзор»): связь, клиенты и скорости — по центру под заголовками */
+#t-tab td.n, #t-tab td.c, #ifs td.n { text-align: center; }
+/* «Клиенты»: сигнал, каналы, время и объёмы — по центру под заголовками */
+#c-tab td.n { text-align: center; }
 tr.click:hover td { background: var(--hover); }
 tr.grp td { font-weight: 600; }
 tr.member td:first-child { padding-left: 26px; }
@@ -244,6 +283,7 @@ tr.gone td { color: var(--muted); }
 .cpubar { display: inline-block; width: 46px; height: 6px; background: var(--surface-2); border-radius: 3px; vertical-align: middle; margin-right: 6px; overflow: hidden; }
 .cpubar i { display: block; height: 100%; background: var(--s1); border-radius: 3px; }
 .up { color: var(--critical); }
+.d-r { color: var(--critical); } .d-o { color: var(--serious); } .d-g { color: var(--good); } .d-y { color: var(--warning); }
 .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 4px; font-weight: 500; }
 .filters { display: flex; gap: 8px 14px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
 .filters input[type=search] { font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; width: 220px; max-width: 100%; }
@@ -286,6 +326,9 @@ tr.gone td { color: var(--muted); }
   .gauges:not(.sm) .qbtn { width: 12px; height: 12px; font-size: 8px; line-height: 10px; }
 }
 .gauge.go { cursor: pointer; transition: background .12s; }
+.go-chart { cursor: pointer; }
+.lnk { background: none; border: 0; padding: 0; color: var(--link); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.lnk:hover { text-decoration: underline; }
 .gauge.go:hover { background: var(--hover); }
 .gauge.go:focus-visible { outline: 2px solid var(--s1); outline-offset: 1px; }
 .gauge .gh { display: flex; justify-content: center; align-items: center; gap: 6px; min-width: 0; }
@@ -368,11 +411,24 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } ca
 // ---------- форматирование ----------
 const f1 = x => (x == null || isNaN(x)) ? '—' : (Math.abs(x) >= 100 ? Math.round(x).toString() : (+x).toFixed(1).replace('.', ','));
 const pct = x => f1(x) + '%';
-function mb(x) { if (x == null || isNaN(x)) return '—'; if (Math.abs(x) >= 1024) return (x / 1024).toFixed(1).replace('.', ',') + ' ГБ'; return f1(x) + ' МБ'; }
+function mb(x) { if (x == null || isNaN(x)) return '—'; if (Math.abs(x) >= 1024) return (x / 1024).toFixed(1).replace('.', ',') + ' GB'; return f1(x) + ' MB'; }
 const kb = x => mb(x / 1024);
-function bytesK(k) { const g = k / 1048576; if (g >= 1024) return (g / 1024).toFixed(1).replace('.', ',') + ' ТБ'; if (g >= 1) return g.toFixed(1).replace('.', ',') + ' ГБ'; return (k / 1024).toFixed(0) + ' МБ'; }
+function bytesK(k) { const g = k / 1048576; if (g >= 1024) return (g / 1024).toFixed(1).replace('.', ',') + ' TB'; if (g >= 1) return g.toFixed(1).replace('.', ',') + ' GB'; return (k / 1024).toFixed(0) + ' MB'; }
+// ячейка объёма: полоска всегда у левого края ячейки, число — у правого (полоски всех строк начинаются в одной точке)
+const volCell = (f, c, txt) => `<span class="volc"><span class="vol"><i style="width:${(Math.max(0, Math.min(1, f || 0)) * 100).toFixed(1)}%;background:${c}"></i></span><span>${txt}</span></span>`;
+// три ячейки «Получено · Отправлено · Всего» строки r таблицы адресов (rows — все строки, для масштаба полосок):
+// получено и отправлено — общий масштаб по большему из двух столбцов, всего — свой масштаб и два цвета
+function volCells(r, rows) {
+  if (!rows.mx) { rows.mx = Math.max(1, ...rows.map(x => Math.max(x.u, x.d))); rows.mt = Math.max(1, ...rows.map(x => x.u + x.d)); }
+  return `<td class="n vc">${volCell(r.d / rows.mx, 'var(--s1)', bytes(r.d))}</td><td class="n vc">${volCell(r.u / rows.mx, 'var(--s2)', bytes(r.u))}</td>` +
+    `<td class="n vc">${volCell2((r.u + r.d) / rows.mt, r.d, r.u, bytes(r.u + r.d))}</td>`;
+}
+// «Всего» = получено + отправлено: длина полоски — доля от максимума, внутри — два цвета в пропорции
+// получено (синий) : отправлено (оранжевый). Пример: 1000 и 150 → 87% синего и 13% оранжевого
+const volCell2 = (f, d, u, txt) => { const s = (d || 0) + (u || 0), pd = s > 0 ? d / s * 100 : 0;
+  return `<span class="volc"><span class="vol" title="получено ${Math.round(pd)}% · отправлено ${Math.round(100 - pd)}%"><span class="vb" style="width:${(Math.max(0, Math.min(1, f || 0)) * 100).toFixed(1)}%"><i style="width:${pd.toFixed(1)}%;background:var(--s1)"></i><i style="width:${(100 - pd).toFixed(1)}%;background:var(--s2)"></i></span></span><span>${txt}</span></span>`; };
 function bytes(b) {
-  if (b == null || isNaN(b)) return '—'; const u = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ']; let i = 0; b = +b;
+  if (b == null || isNaN(b)) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; b = +b;
   while (b >= 1024 && i < 4) { b /= 1024; i++; }
   return (i ? (b >= 100 ? Math.round(b) : b.toFixed(1).replace('.', ',')) : Math.round(b)) + ' ' + u[i];
 }
@@ -384,11 +440,11 @@ function alignSeries(list) {
   const ks = [...keys].sort((a, b) => a - b);
   return { t: ks.map(k => k * step), vs: maps.map(m => { let p = 0; return ks.map(k => (m.has(k) ? (p = m.get(k)) : p)); }) };
 }
-function mbit(x) { if (x == null || isNaN(x)) return '—'; if (x < 1) return Math.round(x * 1000) + ' кбит/с'; return f1(x) + ' Мбит/с'; }
+function mbit(x) { if (x == null || isNaN(x)) return '—'; if (x < 1) return Math.round(x * 1000) + ' kbps'; return f1(x) + ' Mbps'; }
 function dur(s) {
   s = Math.max(0, Math.round(s)); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
-  const r = d ? `${d} д ${h} ч` : h ? `${h} ч ${m} мин` : m ? `${m} мин` : `${s} с`;
-  return r.replace(/ /g, ' ');   // неразрывные пробелы: «5 ч 45 мин» не переносится по частям
+  const r = d ? `${d} d ${h} h` : h ? `${h} h ${m} min` : m ? `${m} min` : `${s} s`;
+  return r.replace(/ /g, ' ');   // неразрывные пробелы: «5 h 45 min» не переносится по частям
 }
 const hhmm = t => { const d = new Date(t * 1000); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
 const hhmmss = t => hhmm(t) + ':' + String(new Date(t * 1000).getSeconds()).padStart(2, '0');
@@ -406,7 +462,7 @@ const TH = { cpu: [70, 95], mem: [80, 95], swap: [60, 90], temp: [85, 95] };
 const lvl = (v, th) => (v == null || isNaN(v)) ? 'none' : v >= th[1] ? 'bad' : v >= th[0] ? 'warn' : 'good';
 const tlText = (v, th) => `color:var(--tl-${lvl(v, th)}-t)`;
 // модули Wi-Fi для циферблата t° Wi-Fi: дуги (первая — внешняя) и строки подсказки
-const wArcs = j => (j.wmods || []).map(w => ({ n: w.n, short: w.n.replace(/\s*ГГц$/, ''), v: w.t }));
+const wArcs = j => (j.wmods || []).map(w => ({ n: w.n, short: w.n.replace(/\s*GHz$/, ''), v: w.t }));
 const wTip = j => { const a = wArcs(j); return a.length > 1
   ? a.map((w, i) => `${i ? 'Внутренняя' : 'Внешняя'} шкала — ${w.n}: ${f1(w.v)} °C.`).join(' ')
   : a.length && a[0].n.includes('+') ? `Один датчик на весь радиочип (${a[0].n}): оба диапазона работают на одном чипе.` : ''; };
@@ -471,6 +527,19 @@ function scrollToPanel(p) {
 // переход с циферблата карточки на роутер: таблица процессов откроется с этой сортировкой
 let pendingGo = null;
 const STATE = { R: 'выполняется', S: 'ожидает', D: 'ждёт диск', Z: 'зомби', T: 'остановлен', I: 'простаивает', t: 'трассировка', X: 'завершён' };
+// статусы, требующие внимания: подсвечиваются красным
+const STATE_BAD = new Set(['D', 'Z', 'T', 't', 'X']);
+const STATE_HELP = `<div><b>Статус процесса</b> — состояние, которое сообщает ядро Linux.</div>
+  <table class="st-tab"><tr><th>Статус</th><th>Название</th><th>Что значит</th></tr>
+  <tr><td>S</td><td>ожидает</td><td>спит и ждёт события (пакета, таймера, ввода) — обычное состояние служб</td></tr>
+  <tr><td>R</td><td>выполняется</td><td>работает на процессоре или стоит в очереди к нему</td></tr>
+  <tr><td>I</td><td>простаивает</td><td>поток ядра без работы</td></tr>
+  <tr class="bad"><td>D</td><td>ждёт диск</td><td>непрерываемое ожидание ввода-вывода; долго — признак зависшего диска или флеш-памяти, повышает Load</td></tr>
+  <tr class="bad"><td>Z</td><td>зомби</td><td>завершился, но родитель не забрал код завершения; много зомби — ошибка в родительской программе</td></tr>
+  <tr class="bad"><td>T</td><td>остановлен</td><td>приостановлен сигналом (SIGSTOP, Ctrl+Z)</td></tr>
+  <tr class="bad"><td>t</td><td>трассировка</td><td>остановлен отладчиком (gdb, strace)</td></tr>
+  <tr class="bad"><td>X</td><td>завершён</td><td>процесс умирает; в снимок почти никогда не попадает</td></tr></table>
+  <div>Красным выделены статусы, требующие внимания.</div>`;
 
 // ---------- API ----------
 function get(url) {
@@ -547,8 +616,8 @@ function health(j) {
     if (swP >= TH.swap[1]) out.push(['critical', 'Swap: почти полон', `${sw} Порог: ${TH.swap[1]}%`]);
     else if (swP > TH.swap[0]) out.push(['warning', 'Swap: повышенное использование', `${sw} Порог: ${TH.swap[0]} / ${TH.swap[1]}%`]);
     const nc = j.ncpu || 1, cores = `${nc} ${nc === 1 ? 'ядре' : 'ядрах'}`, la = (+c.load || 0).toFixed(1).replace('.', ',');
-    if (c.load >= nc * 1.5) out.push(['critical', `Load: очередь CPU · ${la}`, `Средняя загрузка за 1 мин при ${cores}. Порог: ${f1(nc * 1.5)}`]);
-    else if (c.load >= nc) out.push(['warning', `Load: очередь CPU · ${la}`, `Средняя загрузка за 1 мин при ${cores}. Порог: ${nc}`]);
+    if (c.load >= nc * 1.5) out.push(['critical', `Load: очередь CPU · ${la}`, `Средняя загрузка за 1 min при ${cores}. Порог: ${f1(nc * 1.5)}`]);
+    else if (c.load >= nc) out.push(['warning', `Load: очередь CPU · ${la}`, `Средняя загрузка за 1 min при ${cores}. Порог: ${nc}`]);
     for (const d of j.disks || []) {
       const p = d.total ? d.used / d.total * 100 : 0, ps = Math.round(p);
       if (d.mp === '/') {
@@ -678,14 +747,35 @@ function sortRows(rows, key, asc) {
   return rows.slice().sort((a, b) => { const x = a[key], y = b[key]; const c = (typeof x === 'string' || typeof y === 'string') ? String(x).localeCompare(String(y), 'ru') : (x || 0) - (y || 0); return asc ? c : -c; });
 }
 function thead(cols, sort) {
-  return '<tr>' + cols.map(c => `<th class="${c.n ? 'n ' : ''}${c.k ? 'sort ' : ''}${c.cls || ''}${sort.k === c.k ? ' on' + (sort.asc ? ' asc' : '') : ''}" data-k="${c.k || ''}" title="${esc(c.title || '')}">${esc(c.label)}</th>`).join('') + '</tr>';
+  return '<tr>' + cols.map(c => `<th class="${c.n ? 'n ' : ''}${c.k ? 'sort ' : ''}${c.cls || ''}${c.k && sort.k === c.k ? ' on' + (sort.asc ? ' asc' : '') : ''}" data-k="${c.k || ''}" title="${esc(c.title || '')}"${c.w ? ` style="width:${c.w}"` : ''}>${esc(c.label)}${c.help ? `<span class="help th-help"><button type="button" class="qbtn" aria-label="Справка: ${esc(c.label)}">?</button><div class="gtip" role="tooltip">${c.help}</div></span>` : ''}</th>`).join('') + '</tr>';
 }
+// справка «?» в заголовке столбца: наведение — показать, щелчок — закрепить. Подсказка позиционируется
+// относительно окна (position: fixed), чтобы её не обрезала прокручиваемая обёртка таблицы.
+// pin — объект {open} у представления: закреплённая справка остаётся открытой после перерисовки таблицы
+function bindThHelp(table, pin) {
+  table.querySelectorAll('.th-help').forEach(h => {
+    const b = $('.qbtn', h), tip = $('.gtip', h);
+    const place = () => { const r = b.getBoundingClientRect(); tip.style.top = (r.bottom + 6) + 'px'; tip.style.left = Math.max(8, Math.min(innerWidth - tip.offsetWidth - 8, r.right - tip.offsetWidth)) + 'px'; };
+    const show = on => { h.classList.toggle('open', on); if (on) place(); };
+    h.onmouseenter = () => show(true);
+    h.onmouseleave = () => { if (!pin.open) show(false); };
+    b.onclick = e => { e.stopPropagation(); pin.open = !pin.open; show(pin.open); };
+    tip.onclick = e => e.stopPropagation();
+    h.onclick = e => e.stopPropagation();   // щелчок по справке не сортирует столбец
+    if (pin.open) show(true);
+  });
+}
+const closeThHelp = () => document.querySelectorAll('.th-help.open').forEach(h => { h.classList.remove('open'); if (view && view.thPin) view.thPin.open = false; });
+document.addEventListener('click', closeThHelp);
+// подсказка закреплена относительно окна — при прокрутке страницы закрываем, чтобы она не «отрывалась» от кнопки
+addEventListener('scroll', closeThHelp, { passive: true });
 function bindSort(table, sort, rerender) {
   table.querySelectorAll('th.sort').forEach(th => th.onclick = () => {
     const k = th.dataset.k; if (sort.k === k) sort.asc = !sort.asc; else { sort.k = k; sort.asc = (k === 'name' || k === 'router'); } rerender();
   });
 }
-const cpuCell = v => `<span class="cpubar"><i style="width:${Math.min(100, v || 0)}%"></i></span>${pct(v)}`;
+const ldFmt = v => v >= 0.005 ? (+v).toFixed(2).replace('.', ',') : '—';
+const cpuCell = v => `<span class="volc"><span class="cpubar"><i style="width:${Math.min(100, v || 0)}%"></i></span><span>${pct(v)}</span></span>`;
 
 // ---------- маршрутизация и обновление ----------
 let view = null, timer = null, paused = false, gen = 0;
@@ -708,8 +798,13 @@ async function tick() {
   clearTimeout(timer); const my = gen;
   try { await view.refresh(); if (my === gen) setUpd(true, 'обновлено ' + hhmmss(Date.now() / 1000)); }
   catch (e) { if (my === gen) setUpd(false, 'ошибка: ' + e.message); }
-  if (my === gen && !paused && !view.stop) timer = setTimeout(tick, REFRESH);
+  // вкладка в фоне — не опрашиваем роутеры (каждый запрос — работа CPU роутера); вернулись — сразу обновляем
+  if (my === gen && !paused && !view.stop && !document.hidden) timer = setTimeout(tick, REFRESH);
 }
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) clearTimeout(timer);
+  else if (view && !paused && !view.stop) tick();
+});
 function go() {
   gen++; clearTimeout(timer);
   const r = route(), m = $('#main'); m.innerHTML = '';
@@ -772,11 +867,24 @@ const hostTabs = (ip, on) => `<nav class="tabs">${[['o', hostHref(ip), 'Обзо
   .map(([k, h, l]) => `<a href="${h}"${on === k ? ' class="on" aria-current="page"' : ''}>${l}</a>`).join('')}</nav>`;
 // цвета рядов по порядку; седьмого цвета нет — больше шести рядов на графике не выводится
 const SER = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)', 'var(--s7)'];
+// интерфейсов на графике может быть больше шести: дальше — дополнительные цвета, затем по кругу
+const SER_X = ['#13a3b8', '#a0703f', '#8a8f98', '#9fae1c', '#c2453a', '#4b6cb7'];
+const serCol = c => { const a = SER.concat(SER_X); return a[c % a.length]; };
 // диапазон Wi-Fi по частоте, МГц
-const band = f => { f = +f; return f >= 5925 ? '6 ГГц' : f >= 4900 ? '5 ГГц' : f >= 2400 ? '2,4 ГГц' : ''; };
+const band = f => { f = +f; return f >= 5925 ? '6 GHz' : f >= 4900 ? '5 GHz' : f >= 2400 ? '2,4 GHz' : ''; };
 // ---------- топ адресов: со всех роутеров (данные есть у того, через который идёт интернет), сводится по домену ----------
 // only — роутер, чья страница открыта: в топе остаются только его клиенты (и его собственный трафик)
-async function loadTop(range, only) {
+// топ на роутерах пересчитывается не чаще раза в минуту — страница тоже запрашивает его (и клиентов) раз в минуту,
+// а не при каждом обновлении раз в 10 s: каждый запрос — работа CPU всех роутеров
+const topCache = new Map();
+function loadTop(range, only) {
+  const k = range + '|' + (only || ''), c = topCache.get(k), now = Date.now();
+  if (c && now - c.t < 60000) return c.p;
+  const p = loadTopNow(range, only);
+  topCache.set(k, { t: now, p }); p.catch(() => topCache.delete(k));
+  return p;
+}
+async function loadTopNow(range, only) {
   const list = await peers();
   const clP = only ? api(only, 'a=clients').catch(() => null) : Promise.resolve(null);
   const rs = await Promise.all(list.map(ip => api(ip, 'a=top&m=' + (range || 'all')).then(j => ({ ip, j })).catch(e => ({ ip, e }))));
@@ -805,9 +913,10 @@ function forRouter(T, cl, ip, routers) {
     empty: !cl ? `Не удалось получить список клиентов ${name}` : !macs.size && !rows.length ? `У ${name} сейчас нет подключённых клиентов` : T.src.length ? `Клиенты ${name} за этот период с интернетом не обменивались` : T.empty };
 }
 function mergeTop(rs) {
-  const by = new Map(), devs = {}, selfm = {}, rnames = {}, src = []; let since = 0, dns = false;
+  const by = new Map(), devs = {}, selfm = {}, rnames = {}, src = [], nets = {}; let since = 0, dns = false;
   for (const { j } of rs) {
     if (!j) continue; rnames[j.ip] = j.name; selfm[j.ip] = (j.self || {}).m || ''; if (j.dns) dns = true;
+    for (const [b, c] of Object.entries(j.nets || {})) if (!nets[b]) nets[b] = c;   // мост → подсеть
     for (const [ip, d] of Object.entries(j.devs || {})) if (!devs[ip] || (!devs[ip].n && d.n)) devs[ip] = d;
     if (j.rows.length) { src.push(j.name); if (j.since && (!since || j.since < since)) since = j.since; }
     for (const x of j.rows) {
@@ -816,7 +925,7 @@ function mergeTop(rs) {
       for (const [c, v] of Object.entries(x.c)) { const k = c === '@' ? '@' + j.ip : c, p = o.c[k] || (o.c[k] = [0, 0]); p[0] += v[0]; p[1] += v[1]; }
     }
   }
-  return { rows: [...by.values()].sort((a, b) => b.u + b.d - a.u - a.d), devs, selfm, rnames, since, dns, src,
+  return { rows: [...by.values()].sort((a, b) => b.u + b.d - a.u - a.d), devs, selfm, rnames, since, dns, src, nets,
     empty: src.length ? 'За этот период обмена с интернетом не было' : 'Данных пока нет: сбор начинается после установки, первые цифры — через минуту' };
 }
 // сайт = основной домен: rr4---sn-abc.googlevideo.com → googlevideo.com, news.bbc.co.uk → bbc.co.uk; IP — как есть
@@ -841,20 +950,17 @@ function devInfo(c, T) {
   if (c[0] === '@') { const ip = c.slice(1); return { n: T.rnames[ip] || ip, ip, m: T.selfm[ip] || '' }; }
   const d = T.devs[c] || {}; return { n: d.n || '', ip: c, m: d.m || '' };
 }
-// «Хостнейм | IP | MAC»; незнакомое устройство — без имени
+// «Hostname | IP | MAC»; незнакомое устройство — без имени
 const devFull = (c, T) => { const d = devInfo(c, T); return [d.n, d.ip, d.m].filter(Boolean).join(' | '); };
 // коротко (в списках): имя, а у незнакомого — IP
 const devName = (c, T) => { const d = devInfo(c, T); return d.n || d.ip; };
-// подсказка к списку устройств: все, «Хостнейм | IP | MAC — объём»
+// подсказка к списку устройств: все, «Hostname | IP | MAC — объём»
 const devTip = (c, T) => Object.entries(c).sort((a, b) => b[1][0] + b[1][1] - a[1][0] - a[1][1]).map(([k, v]) => `${devFull(k, T)} — ${bytes(v[0] + v[1])}`).join('\n');
-// главное устройство полностью «Хостнейм | IP | MAC», остальные — «+N» (все — в подсказке)
+// главное устройство полностью «Hostname | IP | MAC» (все устройства с объёмами — в подсказке devTip)
 function devTop(c, T) {
   const e = Object.entries(c).sort((a, b) => b[1][0] + b[1][1] - a[1][0] - a[1][1]);
-  return e.length ? devFull(e[0][0], T) + (e.length > 1 ? `  +${e.length - 1}` : '') : '';
-}
-function devList(c, T) {
-  const e = Object.entries(c).sort((a, b) => b[1][0] + b[1][1] - a[1][0] - a[1][1]);
-  return e.slice(0, 2).map(([k]) => devName(k, T)).join(', ') + (e.length > 2 ? ` +${e.length - 2}` : '');
+  // только основное устройство (больше всех обменялось с адресом); полный список — во всплывающей подсказке ячейки
+  return e.length ? devFull(e[0][0], T) : '';
 }
 function topSub(T, range) {
   let s = `за ${rangeFor(range)}, ` + (T.only ? `клиенты ${T.only.name} (${T.only.n} ${plural(T.only.n, 'устройство', 'устройства', 'устройств')} сейчас)` : 'все роутеры');
@@ -866,7 +972,7 @@ const hostHref = ip => `#/r/${ip}`, procHref = (ip, pid, st) => `#/r/${ip}/p/${p
 
 // раскладка карточек: до 3 роутеров — все в один ряд, больше 3 — по два в ряд; на узком экране 2 или 1.
 // Карточка неполного последнего ряда растягивается на весь ряд.
-// Если панель «Самые нагруженные процессы в сети» свёрнута, карточки растягиваются до низа экрана:
+// Если панель «Самые ресурсоёмкие процессы в сети» свёрнута, карточки растягиваются до низа экрана:
 // лишняя высота уходит в мини-графики CPU и памяти (третий ряд каждой карточки — 1fr).
 function layoutCards(box) {
   if (!box) return;
@@ -894,7 +1000,7 @@ class Overview {
     crumbs([]);
     setHelp('<div><b>Роутеры в сети</b></div><div>Поиск роутеров…</div>');
     m.innerHTML = `<div class="grid g-cards" id="cards"></div>
-      <div class="section panel fold${lsGet('rmon.nettop', false) ? ' open' : ''}" id="nettop-p"><div class="panel-h fold-h" id="nettop-h" role="button" tabindex="0" aria-expanded="${lsGet('rmon.nettop', false)}"><h2><span class="chev">▸</span> Самые нагруженные процессы в сети</h2><span class="muted" style="font-size:12px" id="nettop-sub"></span></div>
+      <div class="section panel fold${lsGet('rmon.nettop', false) ? ' open' : ''}" id="nettop-p"><div class="panel-h fold-h" id="nettop-h" role="button" tabindex="0" aria-expanded="${lsGet('rmon.nettop', false)}"><h2><span class="chev">▸</span> Самые ресурсоёмкие процессы в сети</h2><span class="muted" style="font-size:12px" id="nettop-sub"></span></div>
       <div class="fold-b tbl-wrap"><table id="nettop"></table></div></div>`;
     // свёрнута — освободившееся место отдаётся карточкам роутеров (layoutCards растягивает их по высоте экрана)
     const fp = $('#nettop-p', m), fh = $('#nettop-h', m);
@@ -904,7 +1010,7 @@ class Overview {
   }
   async refresh() {
     const list = await peers(); this.list = list;
-    setHelp(`<div><b>Роутеры в сети</b></div><div>${list.length} ${list.length === 1 ? 'роутер' : list.length < 5 ? 'роутера' : 'роутеров'} с RouterMon · данные каждые 10 с.</div><div>Нажмите на роутер или процесс, чтобы открыть подробности; на циферблат — процессы роутера с нужной сортировкой.</div>`);
+    setHelp(`<div><b>Роутеры в сети</b></div><div>${list.length} ${list.length === 1 ? 'роутер' : list.length < 5 ? 'роутера' : 'роутеров'} с RouterMon · данные каждые 10 s.</div><div>Нажмите на роутер или процесс, чтобы открыть подробности; на циферблат — процессы роутера с нужной сортировкой.</div>`);
     const res = await Promise.all(list.map(ip => api(ip, 'a=sum').then(j => ({ ip, j })).catch(e => ({ ip, e }))));
     res.forEach(r => this.data[r.ip] = r);
     this.render();
@@ -961,8 +1067,8 @@ class Overview {
       <div class="card-h"><div class="t"><div class="name">${esc(j.name || j.ip)}</div><div class="sub" title="${esc(j.ip)} · ${esc(j.model)} · ${esc(j.fw)} · работает ${dur(j.uptime)}">${esc(j.ip)} · ${esc(j.model)} · работает ${dur(j.uptime)}</div></div>
         <div class="badges">${health(j).map(h => badge(...h)).join('')}</div></div>
       <div class="gauges sm">${
-        gauge({ ip: j.ip, key: 'cpu', label: 'CPU', value: c.cpu, max: 100, unit: '%', th: TH.cpu, title: 'Загрузка всех ядер за последние 10 с.',
-          sub: `${j.ncpu} ядра, load ${f1(c.load)}.`, sub2: `Процессы ${pct(c.user)}, ядро ${pct(c.sys)}, прерывания ${pct(c.irq)}.`, go: { sort: 'cpu', kern: true }, goText: 'процессы роутера по загрузке CPU' }) +
+        gauge({ ip: j.ip, key: 'cpu', label: 'CPU', value: c.cpu, max: 100, unit: '%', th: TH.cpu, title: 'Загрузка всех ядер за последние 10 s.',
+          sub: `${j.ncpu} ядра, load ${f1(c.load)}.`, sub2: `Процессы ${pct(c.user)}, ядро ${pct(c.sys)}, прерывания ${pct(c.irq)}.`, go: { sort: 'cpu' }, goText: 'процессы роутера по загрузке CPU' }) +
         gauge({ ip: j.ip, key: 'mem', label: 'RAM', value: c.usedPct, max: 100, unit: '%', th: TH.mem, title: 'Занятая память: всего − доступно приложениям.',
           sub: `Доступно ${mb(c.avail)} из ${mb(c.total)}.`, sub2: `Процессам ${mb(c.anon)}, ядру ${mb(c.kern)}.`, go: { sort: 'rss' }, goText: 'процессы роутера по занятой памяти' }) +
         // одинаковый набор циферблатов у всех роутеров: чего нет (swap, датчик), показывается серым «n/a»
@@ -990,20 +1096,23 @@ class Overview {
     </div>`;
   }
   renderTop() {
-    // с каждого роутера — 5 первых по выбранной сортировке (по умолчанию по CPU)
-    const PER = 5, rows = [];
-    const k = (this.sort.k === 'router' || this.sort.k === 'name') ? 'cpu' : this.sort.k;
+    // с каждого роутера — 5 первых по выбранной сортировке (по умолчанию по CPU). Роутеры идут в том же порядке,
+    // что и карточки сверху; сортировка — только внутри строк одного роутера. Столбец «Роутер» — если роутеров больше одного
+    const PER = 5, many = this.list.length > 1;
+    if (this.sort.k === 'router') this.sort = { k: 'cpu', asc: false };
+    const k = this.sort.k === 'name' ? 'cpu' : this.sort.k;
+    const nm = { cpu: 'CPU', rss: 'памяти', pid: 'PID', thr: 'потокам' }[k] || 'CPU';
+    $('#nettop-sub', this.m).textContent = `по ${PER} самых ресурсоёмких ${many ? 'с каждого роутера ' : ''}(по ${nm}); CPU за последние 10 s`;
+    const cols = [...(many ? [{ label: 'Роутер' }] : []), { k: 'name', label: 'Процесс' }, { k: 'pid', label: 'PID', n: 1, cls: 'hide-sm' }, { k: 'cpu', label: 'CPU', n: 1, title: '% всей мощности роутера за последние 10 s' }, { k: 'rss', label: 'Память (RSS)', n: 1 }, { k: 'thr', label: 'Потоки', n: 1, cls: 'hide-sm' }];
+    let body = '';
     for (const ip of this.list) {
       const r = this.data[ip]; if (!r || r.e) continue;
-      for (const p of sortRows((r.j.top || []).filter(p => !p.gone), k, false).slice(0, PER)) rows.push({ ...p, router: r.j.name, ip });
+      const ps = sortRows(sortRows((r.j.top || []).filter(p => !p.gone), k, false).slice(0, PER), this.sort.k, this.sort.asc);
+      body += ps.map((p, i) => `<tr class="click${many && !i ? ' grp-first' : ''}" data-h="${procHref(ip, p.pid, p.st)}">${many && !i ? `<td rowspan="${ps.length}" class="rt-cell"><a href="${hostHref(ip)}">${esc(r.j.name || ip)}</a></td>` : ''}<td><span class="pname">${esc(p.name)}</span><span class="pcmd mono">${esc(p.cmd)}</span></td><td class="n hide-sm">${p.pid}</td><td class="n">${cpuCell(p.cpu)}</td><td class="n">${kb(p.rss)}</td><td class="n hide-sm">${p.thr}</td></tr>`).join('');
     }
-    const nm = { cpu: 'CPU', rss: 'памяти', pid: 'PID', thr: 'потокам' }[k] || 'CPU';
-    $('#nettop-sub', this.m).textContent = `по ${PER} самых нагруженных с каждого роутера (по ${nm}); CPU за последние 10 с`;
-    const cols = [{ k: 'router', label: 'Роутер' }, { k: 'name', label: 'Процесс' }, { k: 'pid', label: 'PID', n: 1, cls: 'hide-sm' }, { k: 'cpu', label: 'CPU', n: 1, title: '% всей мощности роутера за последние 10 с' }, { k: 'rss', label: 'Память (RSS)', n: 1 }, { k: 'thr', label: 'Потоки', n: 1, cls: 'hide-sm' }];
     const t = $('#nettop', this.m);
-    const sorted = sortRows(rows, this.sort.k, this.sort.asc);
-    t.innerHTML = thead(cols, this.sort) + sorted.map(p => `<tr class="click" data-h="${procHref(p.ip, p.pid, p.st)}"><td>${esc(p.router)}</td><td><span class="pname">${esc(p.name)}</span><span class="pcmd mono">${esc(p.cmd)}</span></td><td class="n hide-sm">${p.pid}</td><td class="n">${cpuCell(p.cpu)}</td><td class="n">${kb(p.rss)}</td><td class="n hide-sm">${p.thr}</td></tr>`).join('');
-    t.querySelectorAll('tr[data-h]').forEach(tr => tr.onclick = () => location.hash = tr.dataset.h);
+    t.innerHTML = thead(cols, this.sort) + body;
+    t.querySelectorAll('tr[data-h]').forEach(tr => tr.onclick = e => { if (!e.target.closest('a')) location.hash = tr.dataset.h; });
     bindSort(t, this.sort, () => this.renderTop());
   }
 }
@@ -1014,7 +1123,7 @@ class HostView {
     this.m = m; this.ip = r.ip;
     this.range = +lsGet('rmon.rangeMin', 60); if (!RANGES.includes(this.range)) this.range = 60;   // 0 = «Всё»
     this.sort = lsGet('rmon.psort', { k: 'cpu', asc: false }); this.f = lsGet('rmon.pfilt', { q: '', kern: false, gone: false, group: false }); this.f.q = '';
-    this.open = new Set(); this.iface = null;
+    this.open = new Set(); this.iface = null; this.thPin = { open: false }; this.ttSort = lsGet('rmon.ttsort', { k: 'tot', asc: false });
     crumbs([{ label: r.ip }]);
     setHelp('<div><b>Роутер</b></div><div>Циферблаты — текущее состояние, цвет — светофор по порогам. «?» у циферблата — подробности; щелчок по циферблату — таблица процессов с подходящей сортировкой.</div><div>Период графиков выбирается под циферблатами (на сами циферблаты он не влияет); таблица процессов всегда за последний час.</div>');
     m.innerHTML = `<div class="panel-h" style="margin-bottom:var(--gap)"><div class="hline"><h1 id="h-name">${esc(r.ip)}</h1><span class="sub" id="h-sub"></span></div>
@@ -1023,20 +1132,18 @@ class HostView {
       <div class="panel" style="margin-bottom:var(--gap)"><div class="gauges" id="h-kpis"></div></div>
       <div style="margin-bottom:var(--gap)"><label class="ink2" style="font-size:13px;display:inline-flex;gap:6px;align-items:center">Период графиков
           <select id="range" class="btn">${RANGES.map(h => `<option value="${h}"${h === this.range ? ' selected' : ''}>${rangeLabel(h)}</option>`).join('')}</select></label></div>
-      <div class="grid g-2">
-        <div class="panel"><div class="panel-h"><h2>CPU, %</h2><span class="muted" id="c-cpu-n"></span></div><div id="c-cpu"></div></div>
-        <div class="panel"><div class="panel-h"><h2>Память, МБ</h2><span class="muted" style="font-size:12px">наведите — разбивка</span></div><div id="c-mem"></div></div>
-        <div class="panel"><div class="panel-h"><h2>Температура, °C</h2></div><div id="c-temp"></div></div>
-        <div class="panel"><div class="panel-h"><h2>Сеть</h2><span class="r"><select id="ifsel" class="btn"></select></span></div><div id="c-net"></div></div>
-        <div class="panel"><div class="panel-h"><h2>Swap (zram), МБ</h2></div><div id="c-swap"></div></div>
-        <div class="panel"><div class="panel-h"><h2>Нагрузка (load average 1 мин)</h2></div><div id="c-load"></div></div>
-      </div>
-      <div class="grid g-12 section">
-        <div class="panel"><div class="panel-h"><h2>Интерфейсы</h2><span class="muted" style="font-size:12px">нажмите — показать на графике</span></div><div class="tbl-wrap"><table id="ifs"></table></div></div>
-        <div class="panel" id="tt-p"><div class="panel-h"><h2>Топ адресов</h2><span class="muted" style="font-size:12px" id="tt-sub"></span><a class="r" style="font-size:13px" href="${trafficHref(r.ip)}">Подробно →</a></div>
+      <div class="grid g-ov">
+        <div class="panel" style="grid-area:cpu"><div class="panel-h"><h2>CPU, %</h2><span class="muted" id="c-cpu-n"></span></div><div id="c-cpu"></div></div>
+        <div class="panel" style="grid-area:mem"><div class="panel-h"><h2>RAM, MB</h2><span class="muted" style="font-size:12px">наведите — разбивка</span></div><div id="c-mem"></div></div>
+        <div class="panel" style="grid-area:temp"><div class="panel-h"><h2>t, °C</h2></div><div id="c-temp"></div></div>
+        <div class="panel" style="grid-area:net"><div class="panel-h"><h2>Сеть, Mbps</h2><span class="r"><select id="ifsel" class="btn"></select></span></div><div id="c-net"></div></div>
+        <div class="panel" style="grid-area:swap"><div class="panel-h"><h2>Swap, MB</h2></div><div id="c-swap"></div></div>
+        <div class="panel" style="grid-area:load"><div class="panel-h"><h2>Load, av/1 min</h2></div><div id="c-load"></div></div>
+        <div class="panel ov-low" style="grid-area:ifs"><div class="panel-h"><h2>Интерфейсы</h2><span class="muted" style="font-size:12px">нажмите — показать на графике</span></div><div class="tbl-wrap"><table id="ifs"></table></div></div>
+        <div class="panel ov-low" id="tt-p" style="grid-area:top"><div class="panel-h"><h2>Топ адресов</h2><span class="muted" style="font-size:12px" id="tt-sub"></span><a class="r" style="font-size:13px" href="${trafficHref(r.ip)}">Подробно →</a></div>
           <div class="tbl-wrap" id="tt-wrap" style="overflow:hidden"><table id="tt-tab"></table></div></div>
       </div>
-      <div class="panel section fold${lsGet('rmon.procsOpen', true) ? ' open' : ''}" id="p-panel">
+      <div class="panel section fold" id="p-panel">
         <div class="panel-h fold-h" id="p-head" role="button" tabindex="0"><h2><span class="chev">▸</span> Процессы</h2><span class="muted" id="p-count" style="font-size:12px"></span><span class="r muted" style="font-size:12px">таблица — за последний час · CPU — % всей мощности роутера (все ядра = 100%)</span></div>
         <div class="fold-b">
         <div class="filters">
@@ -1048,9 +1155,10 @@ class HostView {
         <div class="tbl-wrap"><table id="ptab"></table></div>
         </div>
       </div>`;
-    // блок «Процессы» сворачивается щелчком по заголовку; состояние запоминается
+    // блок «Процессы» сворачивается и разворачивается щелчком по заголовку
     const pp = $('#p-panel', m), ph = $('#p-head', m);
-    this.setProcsOpen = o => { pp.classList.toggle('open', o); ph.setAttribute('aria-expanded', o); lsSet('rmon.procsOpen', o); };
+    // при открытии вкладки «Процессы» всегда свёрнуты; разворачиваются щелчком по заголовку или переходом с циферблата/графика
+    this.setProcsOpen = o => { pp.classList.toggle('open', o); ph.setAttribute('aria-expanded', o); };
     ph.setAttribute('aria-expanded', pp.classList.contains('open'));
     ph.onclick = () => this.setProcsOpen(!pp.classList.contains('open'));
     ph.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ph.onclick(); } };
@@ -1067,19 +1175,31 @@ class HostView {
     const pq = $('#pq', m); pq.oninput = () => { this.f.q = pq.value.trim().toLowerCase(); this.renderProcs(); };
     for (const [id, k] of [['fg', 'group'], ['fk', 'kern'], ['fz', 'gone']]) { const el = $('#' + id, m); el.checked = this.f[k]; el.onchange = () => { this.f[k] = el.checked; lsSet('rmon.pfilt', this.f); this.renderProcs(); }; }
     $('#ifsel', m).onchange = e => { this.iface = e.target.value; this.renderNet(); this.renderIfs(); };
+    // щелчок по графику, у которого есть показатель в «Процессах», — к таблице процессов с сортировкой по нему
+    for (const [id, sort, what] of [['c-cpu', 'cpu', 'загрузке CPU'], ['c-mem', 'rss', 'занятой памяти'], ['c-swap', 'swap', 'объёму в swap'], ['c-load', 'ld', 'вкладу в Load']]) {
+      const el = $('#' + id, m), h = $('.panel-h', el.closest('.panel'));
+      el.classList.add('go-chart'); el.title = `Щёлкните — процессы по ${what}`;
+      el.onclick = () => this.goProcs({ sort });
+      h.insertAdjacentHTML('beforeend', `<button type="button" class="lnk r go-p" title="Процессы по ${what}">Процессы →</button>`);
+      $('.go-p', h).onclick = () => this.goProcs({ sort });
+    }
   }
   // «Топ адресов» за выбранный период: сайты, куда ходили устройства сети, объём получен/отправлен
   renderTop() {
     const T = this.tt; if (!T) return;
-    const g = groupTop(T.rows, true);
+    let g = groupTop(T.rows, true);
+    g.forEach(r => { r.name = r.h; r.tot = r.u + r.d; });
+    g = sortRows(g, this.ttSort.k, this.ttSort.asc);
     $('#tt-sub', this.m).textContent = topSub(T, this.range);
-    const t = $('#tt-tab', this.m), mx = Math.max(1, ...g.map(r => r.u + r.d));
-    t.innerHTML = `<tr><th class="n">#</th><th>Сайт / адрес</th><th class="hide-sm">Устройства</th><th class="n">↓ Получено</th><th class="n">↑ Отправлено</th><th class="n">Всего</th></tr>` +
+    const t = $('#tt-tab', this.m);
+    t.classList.add('vt');
+    t.innerHTML = thead([{ label: '#', n: 1 }, { k: 'name', label: 'Сайт / адрес' }, { label: 'Устройства', cls: 'hide-sm' },
+      { k: 'd', label: '↓ Получено', n: 1 }, { k: 'u', label: '↑ Отправлено', n: 1 }, { k: 'tot', label: 'Всего', n: 1 }], this.ttSort) +
       (g.slice(0, 60).map((r, i) => `<tr title="${esc(r.hosts.slice(0, 12).map(h => h.h).join('\n'))}"><td class="n muted">${i + 1}</td>
         <td><span class="pname">${esc(r.h)}</span>${r.hosts.length > 1 ? `<span class="tag">${r.hosts.length} ${plural(r.hosts.length, 'адрес', 'адреса', 'адресов')}</span>` : ''}</td>
-        <td class="hide-sm role" title="${esc(devTip(r.c, T))}">${esc(devTop(r.c, T))}</td><td class="n">${bytes(r.d)}</td><td class="n">${bytes(r.u)}</td>
-        <td class="n"><span class="vol"><i style="width:${((r.u + r.d) / mx * 100).toFixed(1)}%;background:var(--s1)"></i></span>${bytes(r.u + r.d)}</td></tr>`).join('')
+        <td class="hide-sm role" title="${esc(devTip(r.c, T))}">${esc(devTop(r.c, T))}</td>${volCells(r, g)}</tr>`).join('')
        || `<tr><td colspan="6" class="empty">${esc(T.empty)}</td></tr>`);
+    bindSort(t, this.ttSort, () => { lsSet('rmon.ttsort', this.ttSort); this.renderTop(); });
     this.fitTop();
   }
   // окно стоит в ряду с «Интерфейсами»: список прокручивается внутри, по высоте не длиннее соседа
@@ -1116,18 +1236,18 @@ class HostView {
     const rf = rangeFor(this.range);
     const swT = (j.swapTotal || 0) / 1024, nc = j.ncpu || 1;
     $('#h-kpis', this.m).innerHTML =
-      gauge({ label: 'CPU', value: c.cpu, max: 100, unit: '%', th: TH.cpu, title: 'Загрузка всех ядер за последние 10 с.',
+      gauge({ label: 'CPU', value: c.cpu, max: 100, unit: '%', th: TH.cpu, title: 'Загрузка всех ядер за последние 10 s.',
         sub: `В среднем за ${rf}: ${pct(avgArr(cpuH))}.`, sub2: `Процессы ${pct(c.user)}, ядро ${pct(c.sys)}, прерывания ${pct(c.irq)}, ожидание диска ${pct(c.io)}.`,
-        go: { sort: 'cpu', kern: true }, goText: 'процессы по загрузке CPU' }) +
+        go: { sort: 'cpu' }, goText: 'процессы по загрузке CPU' }) +
       gauge({ label: 'RAM', value: c.usedPct, max: 100, unit: '%', th: TH.mem, title: 'Занято = всего − доступно приложениям.',
         sub: `Доступно ${mb(c.avail)} из ${mb(c.total)}.`, sub2: `Процессам ${mb(c.anon)}, ядру ${mb(c.kern)} (драйверы, zram, slab).`,
         go: { sort: 'rss' }, goText: 'процессы по занятой памяти' }) +
       (swT > 0 ? gauge({ label: 'Swap', value: c.swap / swT * 100, max: 100, th: TH.swap, text: mb(c.swap), title: 'Сжатая память в ОЗУ (zram), куда ядро вытесняет редко используемые страницы.',
         sub: `Занято ${mb(c.swap)} из ${mb(swT)} (${pct(c.swap / swT * 100)}).`, go: { sort: 'swap' }, goText: 'процессы по объёму в swap' })
         : gauge({ label: 'Swap', value: NaN, th: TH.swap, text: 'n/a', title: 'Swap на этом роутере не настроен.' })) +
-      gauge({ label: 'Load', value: c.load, max: nc * 2, th: [nc, nc * 1.5], fmt: v => (+v).toFixed(2).replace('.', ','), title: 'Load average за 1 мин: сколько процессов в среднем работает или ждёт CPU и диск.',
+      gauge({ label: 'Load', value: c.load, max: nc * 2, th: [nc, nc * 1.5], fmt: v => (+v).toFixed(2).replace('.', ','), title: 'Load average за 1 min: сколько процессов в среднем работает или ждёт CPU и диск.',
         sub: `${nc} = все ${nc} ядра заняты полностью.`, sub2: `Среднее за ${rf}: ${f1(avgArr(H.load))}.`,
-        go: { chart: 'c-load' }, goText: 'график нагрузки' }) +
+        go: { sort: 'ld' }, goText: 'процессы по вкладу в Load' }) +
       gauge({ label: 't° CPU', value: c.temp, max: 110, unit: '°C', th: TH.temp, title: 'Датчик температуры процессора.', sub: `Максимум за ${rf}: ${f1(Math.max(0, ...H.temp))} °C.`,
         go: { chart: 'c-temp' }, goText: 'график температуры' }) +
       (c.wtemp ? gauge({ label: 't° Wi-Fi', value: c.wtemp, max: 110, unit: '°C', th: TH.temp, title: wArcs(j).length > 1 ? 'Датчики температуры модулей Wi-Fi.' : 'Датчик температуры Wi-Fi.', sub: wTip(j), sub2: `Максимум за ${rf}: ${f1(Math.max(0, ...H.wtemp))} °C.`, arcs: wArcs(j),
@@ -1140,7 +1260,7 @@ class HostView {
     this.ch.mem.opt.max = c.total ? Math.ceil(c.total / 50) * 50 : 0;
     this.ch.mem.draw();
     this.ch.load.opt.ref = { v: j.ncpu, label: `${j.ncpu} = все ядра заняты` };
-    this.ch.load.set(H.t, [{ name: 'Load 1 мин', color: 'var(--s1)', v: v('load') }]);
+    this.ch.load.set(H.t, [{ name: 'Load 1 min', color: 'var(--s1)', v: v('load') }]);
     const ts = [{ name: 'CPU', color: 'var(--s2)', v: v('temp') }]; if (H.wtemp.some(x => x > 0)) ts.push({ name: wArcs(j).length > 1 ? 'Wi-Fi (самый горячий модуль)' : 'Wi-Fi', color: 'var(--s1)', v: v('wtemp') });
     this.ch.temp.set(H.t, ts);
     this.ch.swap.set(H.t, [{ name: 'Swap занято', color: 'var(--s7)', v: v('swap') }]);
@@ -1198,41 +1318,56 @@ class HostView {
   }
   renderProcs() {
     const all = this.j.procs || [], f = this.f;
-    let rows = all.filter(p => (f.kern || !p.k) && (f.gone || !p.gone));
+    // галочки — фильтр «показать только»: потоки ядра и/или завершившиеся; без галочек — работающие обычные процессы
+    let rows = all.filter(p => f.kern || f.gone ? (f.kern && p.k && !p.gone) || (f.gone && p.gone) : !p.k && !p.gone);
     // поиск: несколько вариантов через «|» — подходит любой
     const terms = (f.q || '').toLowerCase().split('|').map(s => s.trim()).filter(Boolean);
     if (terms.length) rows = rows.filter(p => terms.some(q => p.name.toLowerCase().includes(q) || (p.cmd || '').toLowerCase().includes(q) || String(p.pid) === q));
     const sw = this.j.swap || {};
-    rows.forEach(p => { p.drss = p.rss - p.rss0; p.swap = p.gone ? 0 : (sw[p.pid] || 0); });
+    // вклад в Load: сколько ядер процесс занимал за последние 10 s (+1, если он сейчас в непрерываемом ожидании D —
+    // такие процессы тоже входят в Load, хотя CPU не тратят)
+    const nc = this.j.ncpu || 1;
+    rows.forEach(p => { p.drss = p.rss - p.rss0; p.swap = p.gone ? 0 : (sw[p.pid] || 0); p.ld = p.gone ? 0 : (p.cpu || 0) * nc / 100 + (p.state === 'D' ? 1 : 0); });
     const live = all.filter(p => !p.gone);
     $('#p-count', this.m).textContent = `${live.length} процессов, из них потоков ядра ${live.filter(p => p.k).length}; сумма RSS ${kb(live.reduce((a, p) => a + p.rss, 0))}`;
-    const cols = [{ k: 'name', label: 'Процесс' }, { k: 'pid', label: 'PID', n: 1 }, { k: 'cpu', label: 'CPU 10 с', n: 1, title: 'за последние 10 секунд' }, { k: 'avg', label: 'CPU средн.', n: 1, title: 'среднее за последний час (или время жизни процесса)' }, { k: 'peak', label: 'CPU пик', n: 1, title: 'максимум за 10 с в течение часа', cls: 'hide-sm' },
-      { k: 'rss', label: 'Память', n: 1, title: 'RSS — физическая память процесса' }, { k: 'drss', label: 'Δ за час', n: 1, title: 'изменение RSS за час', cls: 'hide-sm' }, { k: 'swap', label: 'Swap', n: 1, title: 'сколько памяти процесса вытеснено в swap (zram)', cls: 'hide-sm' }, { k: 'thr', label: 'Потоки', n: 1, cls: 'hide-sm' }, { k: 'state', label: 'Сост.', cls: 'hide-sm' }];
+    const cols = [{ k: 'name', label: 'Процесс' }, { k: 'pid', label: 'PID', n: 1 }, { k: 'cpu', label: 'CPU 10 s', n: 1, title: 'за последние 10 секунд' }, { k: 'avg', label: 'CPU средн.', n: 1, title: 'среднее за последний час (или время жизни процесса)' }, { k: 'peak', label: 'CPU пик', n: 1, title: 'максимум за 10 s в течение часа', cls: 'hide-sm' },
+      { k: 'ld', label: 'Load', n: 1, title: 'вклад в Load: сколько ядер процесс занимал за последние 10 s (+1 в статусе D — ждёт диск)', cls: 'hide-sm' },
+      { k: 'rss', label: 'Память', n: 1, title: 'RSS — физическая память процесса' }, { k: 'drss', label: 'Δ за час', n: 1, title: 'изменение RSS за час', cls: 'hide-sm' }, { k: 'swap', label: 'Swap', n: 1, title: 'сколько памяти процесса вытеснено в swap (zram)', cls: 'hide-sm' }, { k: 'thr', label: 'Потоки', n: 1, cls: 'hide-sm' }, { k: 'state', label: 'Статус', cls: 'hide-sm', help: STATE_HELP }];
     const t = $('#ptab', this.m), ip = this.ip;
+    // светофор «Δ за час»: три самых больших роста — красные, остальной рост — оранжевый;
+    // три самых больших снижения — зелёные, остальное снижение — жёлтое
+    const dLight = list => {
+      const up = list.map(p => p.drss).filter(v => v > 0).sort((a, b) => b - a), dn = list.map(p => p.drss).filter(v => v < 0).sort((a, b) => a - b);
+      const u3 = up.length ? up[Math.min(2, up.length - 1)] : Infinity, d3 = dn.length ? dn[Math.min(2, dn.length - 1)] : -Infinity;
+      return v => v > 0 ? (v >= u3 ? 'd-r' : 'd-o') : v < 0 ? (v <= d3 ? 'd-g' : 'd-y') : '';
+    };
+    const dc = dLight(rows);
     const prow = (p, member) => `<tr class="click${member ? ' member' : ''}${p.gone ? ' gone' : ''}" data-h="${procHref(ip, p.pid, p.st)}"><td><span class="pname">${esc(p.name)}</span>${p.k ? '<span class="tag">ядро</span>' : ''}${p.gone ? '<span class="tag">завершён</span>' : ''}<span class="pcmd mono" title="${esc(p.cmd)}">${esc(p.cmd)}</span></td>
-      <td class="n">${p.pid}</td><td class="n">${cpuCell(p.cpu)}</td><td class="n">${pct(p.avg)}</td><td class="n hide-sm">${pct(p.peak)}</td><td class="n">${kb(p.rss)}</td>
-      <td class="n hide-sm ${p.drss > 1024 && p.drss > p.rss0 * 0.1 ? 'up' : ''}">${p.drss ? (p.drss > 0 ? '+' : '−') + kb(Math.abs(p.drss)) : '—'}</td><td class="n hide-sm">${p.swap ? kb(p.swap) : '—'}</td><td class="n hide-sm">${p.thr}</td><td class="hide-sm" title="${esc(STATE[p.state] || '')}">${esc(p.state)}</td></tr>`;
+      <td class="n">${p.pid}</td><td class="n">${cpuCell(p.cpu)}</td><td class="n">${pct(p.avg)}</td><td class="n hide-sm">${pct(p.peak)}</td><td class="n hide-sm">${ldFmt(p.ld)}</td><td class="n">${kb(p.rss)}</td>
+      <td class="n hide-sm ${dc(p.drss)}">${p.drss ? (p.drss > 0 ? '+' : '−') + kb(Math.abs(p.drss)) : '—'}</td><td class="n hide-sm">${p.swap ? kb(p.swap) : '—'}</td><td class="n hide-sm">${p.thr}</td><td class="hide-sm${STATE_BAD.has(p.state) ? ' st-bad' : ''}" title="${esc(STATE[p.state] || '')}">${esc(p.state)}</td></tr>`;
     let body = '';
     if (f.group) {
       const g = new Map(); for (const p of rows) { if (!g.has(p.name)) g.set(p.name, []); g.get(p.name).push(p); }
-      const groups = [...g.entries()].map(([name, ps]) => ({ name, ps, pid: ps.length, cpu: ps.reduce((a, p) => a + p.cpu, 0), avg: ps.reduce((a, p) => a + p.avg, 0), peak: Math.max(...ps.map(p => p.peak)), rss: ps.reduce((a, p) => a + p.rss, 0), drss: ps.reduce((a, p) => a + p.drss, 0), swap: ps.reduce((a, p) => a + p.swap, 0), thr: ps.reduce((a, p) => a + p.thr, 0), state: '' }));
+      const groups = [...g.entries()].map(([name, ps]) => ({ name, ps, pid: ps.length, cpu: ps.reduce((a, p) => a + p.cpu, 0), avg: ps.reduce((a, p) => a + p.avg, 0), peak: Math.max(...ps.map(p => p.peak)), ld: ps.reduce((a, p) => a + p.ld, 0), rss: ps.reduce((a, p) => a + p.rss, 0), drss: ps.reduce((a, p) => a + p.drss, 0), swap: ps.reduce((a, p) => a + p.swap, 0), thr: ps.reduce((a, p) => a + p.thr, 0), state: '' }));
+      const gc = dLight(groups);
       for (const G of sortRows(groups, this.sort.k, this.sort.asc)) {
         if (G.ps.length === 1) { body += prow(G.ps[0]); continue; }
         const o = this.open.has(G.name);
-        body += `<tr class="click grp" data-g="${esc(G.name)}"><td>${o ? '▾' : '▸'} ${esc(G.name)} <span class="tag">${G.ps.length} шт.</span></td><td class="n muted">—</td><td class="n">${cpuCell(G.cpu)}</td><td class="n">${pct(G.avg)}</td><td class="n hide-sm">${pct(G.peak)}</td><td class="n">${kb(G.rss)}</td><td class="n hide-sm">${G.drss ? (G.drss > 0 ? '+' : '−') + kb(Math.abs(G.drss)) : '—'}</td><td class="n hide-sm">${G.swap ? kb(G.swap) : '—'}</td><td class="n hide-sm">${G.thr}</td><td class="hide-sm"></td></tr>`;
+        body += `<tr class="click grp" data-g="${esc(G.name)}"><td>${o ? '▾' : '▸'} ${esc(G.name)} <span class="tag">${G.ps.length} шт.</span></td><td class="n muted">—</td><td class="n">${cpuCell(G.cpu)}</td><td class="n">${pct(G.avg)}</td><td class="n hide-sm">${pct(G.peak)}</td><td class="n hide-sm">${ldFmt(G.ld)}</td><td class="n">${kb(G.rss)}</td><td class="n hide-sm ${gc(G.drss)}">${G.drss ? (G.drss > 0 ? '+' : '−') + kb(Math.abs(G.drss)) : '—'}</td><td class="n hide-sm">${G.swap ? kb(G.swap) : '—'}</td><td class="n hide-sm">${G.thr}</td><td class="hide-sm"></td></tr>`;
         if (o) for (const p of sortRows(G.ps, this.sort.k, this.sort.asc)) body += prow(p, true);
       }
     } else body = sortRows(rows, this.sort.k, this.sort.asc).map(p => prow(p)).join('');
-    t.innerHTML = thead(cols, this.sort) + (body || `<tr><td colspan="10" class="empty">Ничего не найдено</td></tr>`);
+    t.innerHTML = thead(cols, this.sort) + (body || `<tr><td colspan="11" class="empty">Ничего не найдено</td></tr>`);
     t.querySelectorAll('tr[data-h]').forEach(tr => tr.onclick = () => location.hash = tr.dataset.h);
     t.querySelectorAll('tr[data-g]').forEach(tr => tr.onclick = () => { const k = tr.dataset.g; this.open.has(k) ? this.open.delete(k) : this.open.add(k); this.renderProcs(); });
     bindSort(t, this.sort, () => { lsSet('rmon.psort', this.sort); this.renderProcs(); });
+    bindThHelp(t, this.thPin);
   }
 }
 
 // ================= Роутер · Трафик =================
 // подробный разбор трафика: все интерфейсы со скоростями, объёмом за период, назначением, клиентами Wi-Fi;
-// отмеченные в таблице интерфейсы (до 6) — на графиках приёма и передачи
+// отмеченные в таблице интерфейсы (сколько угодно) — на графиках приёма и передачи
 class TrafficView {
   constructor(m, r) {
     this.m = m; this.ip = r.ip;
@@ -1240,20 +1375,20 @@ class TrafficView {
     this.sort = lsGet('rmon.tsort', { k: 'vol', asc: false }); this.idle = false;
     this.col = lsGet('rmon.tsel.' + r.ip, null);   // интерфейс → номер цвета; null — выбрать по умолчанию
     crumbs([{ label: r.ip, href: hostHref(r.ip) }, { label: 'Трафик' }]);
-    setHelp('<div><b>Трафик роутера</b></div><div>Графики — приём и передача по отмеченным в таблице интерфейсам. «Адреса» (сворачиваются) — обмен с интернетом за период только клиентов этого роутера (Wi-Fi-станции его точек доступа и устройства на его LAN-портах, по текущему подключению): по сайтам (основной домен) или по отдельным адресам, с фильтром по устройству; подробно об устройствах — на вкладке «Клиенты». Домены берутся из журнала DNS, соединения замеряются раз в 10 с, поэтому очень короткие соединения могут не попасть. Строка с именем роутера — его собственный трафик (например, торрент-клиент).</div><div>Ниже — скорость и объём по каждому интерфейсу. Отметьте до 6 интерфейсов в таблице — они появятся на графиках приёма и передачи.</div><div>Мост (br-…) суммирует трафик своих портов и Wi-Fi, поэтому объёмы моста и его участников не складываются.</div>');
+    setHelp('<div><b>Трафик роутера</b></div><div>Графики — приём и передача по отмеченным в таблице интерфейсам. «Адреса» (сворачиваются) — обмен с интернетом за период только клиентов этого роутера (Wi-Fi-станции его точек доступа и устройства на его LAN-портах, по текущему подключению): по сайтам (основной домен) или по отдельным адресам, с фильтром по устройству; подробно об устройствах — на вкладке «Клиенты». Домены берутся из журнала DNS, соединения замеряются раз в 10 s, поэтому очень короткие соединения могут не попасть. Строка с именем роутера — его собственный трафик (например, торрент-клиент).</div><div>Ниже — скорость и объём по каждому интерфейсу. Отметьте нужные интерфейсы в таблице — они появятся на графиках приёма и передачи.</div><div>Мост (br-…) суммирует трафик своих портов и Wi-Fi, поэтому объёмы моста и его участников не складываются.</div>');
     m.innerHTML = `<div class="panel-h" style="margin-bottom:var(--gap)"><div class="hline"><h1 id="t-name">${esc(r.ip)}</h1><span class="sub" id="t-sub"></span></div></div>
       ${hostTabs(r.ip, 't')}
       <div class="panel" style="margin-bottom:var(--gap)"><div class="kpis even" id="t-kpis"></div></div>
       <div style="margin-bottom:var(--gap)"><label class="ink2" style="font-size:13px;display:inline-flex;gap:6px;align-items:center">Период
           <select id="t-range" class="btn">${RANGES.map(h => `<option value="${h}"${h === this.range ? ' selected' : ''}>${rangeLabel(h)}</option>`).join('')}</select></label></div>
       <div class="grid g-eq">
-        <div class="panel"><div class="panel-h"><h2>↓ Приём, Мбит/с</h2><span class="muted" style="font-size:12px">отмеченные интерфейсы</span></div><div id="t-rx"></div></div>
-        <div class="panel"><div class="panel-h"><h2>↑ Передача, Мбит/с</h2><span class="muted" style="font-size:12px">отмеченные интерфейсы</span></div><div id="t-tx"></div></div>
+        <div class="panel"><div class="panel-h"><h2>↓ Приём, Mbps</h2><span class="muted" style="font-size:12px">отмеченные интерфейсы</span></div><div id="t-rx"></div></div>
+        <div class="panel"><div class="panel-h"><h2>↑ Передача, Mbps</h2><span class="muted" style="font-size:12px">отмеченные интерфейсы</span></div><div id="t-tx"></div></div>
       </div>
       <div class="panel section"><div class="panel-h"><h2>Интерфейсы</h2><span class="muted" style="font-size:12px" id="t-cnt"></span>
           <label class="r ink2" style="font-size:13px;display:inline-flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="t-idle"> Показать без трафика</label></div>
         <div class="tbl-wrap"><table id="t-tab"></table></div></div>
-      <div class="panel section fold${lsGet('rmon.addrFold', false) ? ' open' : ''}" id="ta-p">
+      <div class="panel section fold" id="ta-p">
         <div class="panel-h fold-h" id="ta-h" role="button" tabindex="0"><h2><span class="chev">▸</span> Адреса</h2><span class="muted" style="font-size:12px" id="ta-sub"></span>
           <span class="r seg" id="ta-mode" role="group" aria-label="Группировка"><button type="button" data-m="site">По сайтам</button><button type="button" data-m="host">По адресам</button></span></div>
         <div class="fold-b">
@@ -1264,13 +1399,13 @@ class TrafficView {
     $('#t-range', m).onchange = e => { this.range = +e.target.value; lsSet('rmon.rangeMin', this.range); tick(); };
     $('#t-idle', m).onchange = e => { this.idle = e.target.checked; this.renderTab(); };
     // адреса и устройства
-    this.ta = { mode: lsGet('rmon.tamode', 'site'), q: '', dev: '', open: new Set() };
+    this.ta = { mode: lsGet('rmon.tamode', 'site'), q: '', dev: '', open: new Set(), sort: lsGet('rmon.tasort', { k: 'tot', asc: false }) };
     m.querySelectorAll('#ta-mode button').forEach(b => b.onclick = () => { this.ta.mode = b.dataset.m; lsSet('rmon.tamode', this.ta.mode); this.renderAddr(); });
     $('#ta-q', m).oninput = e => { this.ta.q = e.target.value.trim().toLowerCase(); this.renderAddr(); };
     $('#ta-dev', m).onchange = e => { this.ta.dev = e.target.value; this.renderAddr(); };
-    // «Адреса» сворачиваются щелчком по заголовку (кнопки группировки в заголовке не сворачивают); состояние запоминается
+    // «Адреса» сворачиваются щелчком по заголовку (кнопки группировки в заголовке не сворачивают); при открытии вкладки всегда свёрнуты
     const fp = $('#ta-p', m), fh = $('#ta-h', m);
-    const fold = () => { const o = !fp.classList.contains('open'); fp.classList.toggle('open', o); fh.setAttribute('aria-expanded', o); lsSet('rmon.addrFold', o); };
+    const fold = () => { const o = !fp.classList.contains('open'); fp.classList.toggle('open', o); fh.setAttribute('aria-expanded', o); };
     fh.setAttribute('aria-expanded', fp.classList.contains('open'));
     fh.onclick = e => { if (!e.target.closest('#ta-mode')) fold(); };
     fh.onkeydown = e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === fh) { e.preventDefault(); fold(); } };
@@ -1293,20 +1428,22 @@ class TrafficView {
     if (dev) rows = rows.filter(r => r.c[dev]).map(r => ({ ...r, u: r.c[dev][0], d: r.c[dev][1], c: { [dev]: r.c[dev] } }));
     let g = groupTop(rows, mode === 'site');
     if (q) g = g.filter(r => r.h.toLowerCase().includes(q) || r.hosts.some(h => h.h.toLowerCase().includes(q) || h.ip.includes(q)));
+    g.forEach(r => { r.name = r.h; r.tot = r.u + r.d; });
+    g = sortRows(g, this.ta.sort.k, this.ta.sort.asc);
     const sum = g.reduce((a, r) => a + r.u + r.d, 0);
     $('#ta-sub', this.m).textContent = `${topSub(T, this.range)} · ${g.length} ${mode === 'site' ? plural(g.length, 'сайт', 'сайта', 'сайтов') : plural(g.length, 'адрес', 'адреса', 'адресов')}, ${bytes(sum)}`;
-    const mx = Math.max(1, ...g.map(r => r.u + r.d));
     const row = (r, i, sub) => `<tr${!sub && r.hosts.length > 1 ? ` class="click" data-g="${esc(r.h)}"` : ''}${sub ? ' class="member"' : ''}>
       <td class="n muted">${sub ? '' : i + 1}</td>
       <td style="white-space:nowrap">${!sub && r.hosts.length > 1 ? (this.ta.open.has(r.h) ? '▾ ' : '▸ ') : ''}<span class="${sub ? '' : 'pname'}">${esc(r.h)}</span>${!sub && r.hosts.length > 1 ? `<span class="tag">${r.hosts.length} ${plural(r.hosts.length, 'адрес', 'адреса', 'адресов')}</span>` : ''}</td>
-      <td class="mono hide-sm muted" style="white-space:nowrap">${r.hosts.length === 1 && r.hosts[0].h !== r.hosts[0].ip ? esc(r.hosts[0].ip) + (r.hosts[0].n > 1 ? ` +${r.hosts[0].n - 1}` : '') : ''}</td>
-      <td class="hide-sm role" title="${esc(devTip(r.c, T))}">${esc(devTop(r.c, T))}</td><td class="n">${bytes(r.d)}</td><td class="n">${bytes(r.u)}</td>
-      <td class="n"><span class="vol"><i style="width:${((r.u + r.d) / mx * 100).toFixed(1)}%;background:var(--s1)"></i></span>${bytes(r.u + r.d)}</td></tr>`;
-    const t = $('#ta-tab', this.m);
-    t.innerHTML = `<tr><th class="n">#</th><th>${mode === 'site' ? 'Сайт' : 'Адрес'}</th><th class="hide-sm">IP</th><th class="hide-sm" style="width:100%">Устройства</th><th class="n">↓ Получено</th><th class="n">↑ Отправлено</th><th class="n">Всего</th></tr>` +
+      <td class="mono hide-sm muted" style="white-space:nowrap"${r.hosts.length === 1 && r.hosts[0].n > 1 ? ` title="у домена ${r.hosts[0].n} ${plural(r.hosts[0].n, 'IP-адрес', 'IP-адреса', 'IP-адресов')}, показан один"` : ''}>${r.hosts.length === 1 && r.hosts[0].h !== r.hosts[0].ip ? esc(r.hosts[0].ip) : ''}</td>
+      <td class="hide-sm role" title="${esc(devTip(r.c, T))}">${esc(devTop(r.c, T))}</td>${volCells(r, g)}</tr>`;
+    const t = $('#ta-tab', this.m); t.classList.add('vt');
+    t.innerHTML = thead([{ label: '#', n: 1 }, { k: 'name', label: mode === 'site' ? 'Сайт' : 'Адрес' }, { label: 'IP', cls: 'hide-sm' }, { label: 'Устройства', cls: 'hide-sm', w: '100%' },
+      { k: 'd', label: '↓ Получено', n: 1 }, { k: 'u', label: '↑ Отправлено', n: 1 }, { k: 'tot', label: 'Всего', n: 1 }], this.ta.sort) +
       (g.slice(0, 300).map((r, i) => row(r, i) + (this.ta.open.has(r.h) && r.hosts.length > 1 ? r.hosts.map(h => row({ ...h, hosts: [h] }, 0, true)).join('') : '')).join('')
        || `<tr><td colspan="7" class="empty">${esc(q || dev ? 'Ничего не найдено' : T.empty)}</td></tr>`);
     t.querySelectorAll('tr[data-g]').forEach(tr => tr.onclick = () => { const k = tr.dataset.g; this.ta.open.has(k) ? this.ta.open.delete(k) : this.ta.open.add(k); this.renderAddr(); });
+    bindSort(t, this.ta.sort, () => { lsSet('rmon.tasort', this.ta.sort); this.renderAddr(); });
   }
   async refresh() {
     const seq = this.seq = (this.seq || 0) + 1, range = this.range;
@@ -1350,19 +1487,19 @@ class TrafficView {
   }
   renderKpis() {
     const j = this.j, w = this.rows.find(r => r.name === j.wan) || {}, lw = (j.lg || {})[j.wan] || '';
-    const up = /^wan/.test(lw) ? 'Интернет' : 'Канал', rf = rangeFor(this.range);
+    const rf = rangeFor(this.range);
     const ap = this.rows.filter(r => r.sta != null && !r.mesh), mesh = this.rows.filter(r => r.mesh);
     const k = (l, v, s = '') => `<div class="kpi"><div class="l">${l}</div><div class="v num">${v}</div><div class="s">${s}</div></div>`;
     const u = s => { const m = String(s).match(/^(\S+)\s(.*)$/); return m ? `${m[1]}<small>${m[2]}</small>` : s; };
     const ct = j.ct || [0, 0];
     $('#t-kpis', this.m).innerHTML =
-      k(`${up} ↓ сейчас`, u(mbit(w.rx)), `${esc(j.wan || '—')} · пик ${mbit(w.prx)}`) +
-      k(`${up} ↑ сейчас`, u(mbit(w.tx)), `пик ${mbit(w.ptx)}`) +
+      k('Приём ↓ сейчас', u(mbit(w.rx)), `${esc(j.wan || '—')} · пик ${mbit(w.prx)}`) +
+      k('Передача ↑ сейчас', u(mbit(w.tx)), `пик ${mbit(w.ptx)}`) +
       k('Принято', u(bytes(w.brx)), `за ${rf}`) +
       k('Отдано', u(bytes(w.btx)), `за ${rf}`) +
       `<a class="kpi" href="${clientsHref(this.ip)}" title="Открыть вкладку «Клиенты»"><div class="l">Клиенты Wi-Fi →</div><div class="v num">${ap.reduce((a, r) => a + (r.sta || 0), 0)}</div><div class="s">${ap.length ? `на ${ap.length} ${plural(ap.length, 'точке', 'точках', 'точках')} доступа` : 'точек доступа нет'}</div></a>` +
       (mesh.length ? k('Соседи mesh', mesh.reduce((a, r) => a + (r.sta || 0), 0), mesh.map(r => r.name).join(', ')) : '') +
-      k('Соединения', ct[0], ct[1] ? `из ${ct[1]} возможных (conntrack)` : 'conntrack') +
+      k('Соединения', ct[0], ct[1] ? `из ${ct[1]} возможных` : '') +
       k('Активных интерфейсов', this.rows.filter(r => r.vol > 0).length, `из ${this.rows.length}`);
   }
   renderCharts() {
@@ -1370,7 +1507,7 @@ class TrafficView {
     const al = d => alignSeries(sel.map(([n]) => ({ t: N[n].t, v: N[n][d] })));
     for (const d of ['rx', 'tx']) {
       const a = al(d);
-      this.ch[d].set(a.t, sel.map(([n, c], i) => ({ name: n, color: SER[c], v: a.vs[i] })));
+      this.ch[d].set(a.t, sel.map(([n, c], i) => ({ name: n, color: serCol(c), v: a.vs[i] })));
     }
   }
   renderTab() {
@@ -1378,25 +1515,25 @@ class TrafficView {
       { k: 'rx', label: '↓ сейчас', n: 1 }, { k: 'tx', label: '↑ сейчас', n: 1 }, { k: 'arx', label: '↓ средн.', n: 1, cls: 'hide-sm' }, { k: 'atx', label: '↑ средн.', n: 1, cls: 'hide-sm' },
       { k: 'prx', label: '↓ пик', n: 1, cls: 'hide-sm' }, { k: 'ptx', label: '↑ пик', n: 1, cls: 'hide-sm' }, { k: 'brx', label: 'Принято', n: 1, title: 'объём за период' }, { k: 'btx', label: 'Отдано', n: 1, title: 'объём за период' }];
     const all = this.rows, rows = all.filter(r => this.idle || r.vol > 0 || r.name in this.col);
-    $('#t-cnt', this.m).textContent = `${rows.length} из ${all.length} · объём — за ${rangeFor(this.range)} · отметьте до ${SER.length} для графиков`;
+    $('#t-cnt', this.m).textContent = `${rows.length} из ${all.length} · объём — за ${rangeFor(this.range)} · отметьте нужные для графиков`;
     const mx = Math.max(1, ...rows.map(r => Math.max(r.brx, r.btx)));
-    const link = r => r.st === 'up' ? (r.sp ? (r.sp >= 1000 ? `${f1(r.sp / 1000)} Гбит/с` : `${r.sp} Мбит/с`) : 'работает') : r.st === 'unknown' ? 'работает' : r.st === 'lowerlayerdown' ? 'нет кабеля' : r.st === 'down' ? 'выключен' : r.st || '—';
-    const vb = (v, c) => `<span class="vol"><i style="width:${(v / mx * 100).toFixed(1)}%;background:${c}"></i></span>${bytes(v)}`;
-    const t = $('#t-tab', this.m);
+    const link = r => r.st === 'up' ? (r.sp ? (r.sp >= 1000 ? `${f1(r.sp / 1000)} Gbps` : `${r.sp} Mbps`) : 'работает') : r.st === 'unknown' ? 'работает' : r.st === 'lowerlayerdown' ? 'нет кабеля' : r.st === 'down' ? 'выключен' : r.st || '—';
+    const vb = (v, c) => volCell(v / mx, c, bytes(v));
+    const t = $('#t-tab', this.m); t.classList.add('vt');
     t.innerHTML = thead(cols, this.sort) + (sortRows(rows, this.sort.k, this.sort.asc).map(r => {
       const c = this.col[r.name], on = c != null;
       return `<tr class="click" data-if="${esc(r.name)}"${on ? ' style="background:var(--sel)"' : ''}><td class="ck"><input type="checkbox" ${on ? 'checked' : ''} ${!r.has ? 'disabled' : ''} aria-label="Показать ${esc(r.name)} на графиках"></td>
-        <td class="mono" style="white-space:nowrap">${on ? `<span class="sw" style="background:${SER[c]}"></span>` : ''}${esc(r.name)}${r.name === j.wan ? '<span class="tag">WAN</span>' : ''}</td>
+        <td class="mono" style="white-space:nowrap">${on ? `<span class="sw" style="background:${serCol(c)}"></span>` : ''}${esc(r.name)}${r.name === j.wan ? '<span class="tag">WAN</span>' : ''}</td>
         <td class="hide-sm"><span class="role">${esc(r.role)}${r.m ? `${r.role ? ' · ' : ''}в мосту ${esc(r.m)}` : ''}</span></td>
-        <td class="hide-sm role">${esc(link(r))}</td><td class="n">${r.sta != null ? r.sta : '—'}</td>
+        <td class="hide-sm role c">${esc(link(r))}</td><td class="n">${r.sta != null ? r.sta : '—'}</td>
         <td class="n">${mbit(r.rx)}</td><td class="n">${mbit(r.tx)}</td><td class="n hide-sm">${mbit(r.arx)}</td><td class="n hide-sm">${mbit(r.atx)}</td><td class="n hide-sm">${mbit(r.prx)}</td><td class="n hide-sm">${mbit(r.ptx)}</td>
-        <td class="n">${vb(r.brx, 'var(--s1)')}</td><td class="n">${vb(r.btx, 'var(--s2)')}</td></tr>`;
+        <td class="n vc">${vb(r.brx, 'var(--s1)')}</td><td class="n vc">${vb(r.btx, 'var(--s2)')}</td></tr>`;
     }).join('') || `<tr><td colspan="13" class="empty">Данные ещё собираются…</td></tr>`);
     t.querySelector('th').classList.remove('sort');
     t.querySelectorAll('tr[data-if]').forEach(tr => tr.onclick = e => {
       const n = tr.dataset.if; if (!(this.j.net || {})[n]) return;
       if (n in this.col) delete this.col[n];
-      else { const used = new Set(Object.values(this.col)); const free = SER.findIndex((_, i) => !used.has(i)); if (free < 0) { e.preventDefault(); return; } this.col[n] = free; }
+      else { const used = new Set(Object.values(this.col)); let free = 0; while (used.has(free)) free++; this.col[n] = free; }
       lsSet('rmon.tsel.' + this.ip, this.col); this.renderCharts(); this.renderTab();
     });
     bindSort(t, this.sort, () => { lsSet('rmon.tsort', this.sort); this.renderTab(); });
@@ -1412,7 +1549,7 @@ class ClientsView {
     this.range = +lsGet('rmon.rangeMin', 60); if (!RANGES.includes(this.range)) this.range = 60;
     this.sort = lsGet('rmon.csort', { k: 'sig', asc: false });
     crumbs([{ label: r.ip, href: hostHref(r.ip) }, { label: 'Клиенты' }]);
-    setHelp('<div><b>Клиенты роутера</b></div><div>Устройства, подключённые к этому роутеру прямо сейчас: по Wi-Fi (к его точкам доступа) и по проводу (к его LAN-портам). Хостнейм — из статических хостов /etc/config/dhcp, у незнакомого устройства пусто.</div><div>Сигнал: зелёный — от −60 дБм, жёлтый — до −70, красный — слабее. Скорость канала — согласованная скорость Wi-Fi (↓ к устройству, ↑ от него), а не фактический трафик. Получено и отправлено — обмен с интернетом за период.</div>');
+    setHelp('<div><b>Клиенты роутера</b></div><div>Устройства, подключённые к этому роутеру прямо сейчас: по Wi-Fi (к его точкам доступа) и по проводу (к его LAN-портам). Hostname — из статических хостов /etc/config/dhcp, у незнакомого устройства пусто. Если у устройства там несколько записей в разных сетях, показываются IP и Hostname той сети, к которой оно подключено сейчас.</div><div>Сигнал: зелёный — от −60 dBm, жёлтый — до −70, красный — слабее. Скорость канала — согласованная скорость Wi-Fi (↓ к устройству, ↑ от него), а не фактический трафик. Получено и отправлено — обмен с интернетом за период.</div>');
     m.innerHTML = `<div class="panel-h" style="margin-bottom:var(--gap)"><div class="hline"><h1 id="c-name">${esc(r.ip)}</h1><span class="sub" id="c-sub"></span></div></div>
       ${hostTabs(r.ip, 'c')}
       <div class="panel" style="margin-bottom:var(--gap)"><div class="kpis even" id="c-kpis"></div></div>
@@ -1438,10 +1575,18 @@ class ClientsView {
     // объём за период по каждому IP — из топа адресов
     const vol = {}; for (const r of T.rows) for (const [c, v] of Object.entries(r.c)) { const p = vol[c] || (vol[c] = [0, 0]); p[0] += v[0]; p[1] += v[1]; }
     const sortIp = a => a.slice().sort((x, y) => x.split('.').map(Number).reduce((s, n, i) => s || n - y.split('.').map(Number)[i], 0));
+    // у устройства может быть несколько записей в /etc/config/dhcp (разные сети — разные IP и имена):
+    // показываем IP и имя той сети, где устройство сейчас, — по подсети моста его точки доступа или порта
+    const ip4 = s => s.split('.').reduce((a, n) => a * 256 + (+n), 0);
+    const inNet = (ip, cidr) => { const [b, l] = cidr.split('/'), m = 2 ** (32 - (+l || 32)); return Math.floor(ip4(ip) / m) === Math.floor(ip4(b) / m); };
     const row = (mac, how, x) => {
-      const d = byMac[mac] || { ips: [], n: '' }, ips = sortIp(d.ips);
+      const d = byMac[mac] || { ips: [], n: '' };
+      let ips = sortIp(d.ips), n = d.n;
+      const cidr = T.nets[(cl.br || {})[x.ifn]];
+      const here = cidr ? ips.filter(ip => inNet(ip, cidr)) : [];
+      if (here.length) { ips = here; n = here.map(ip => (T.devs[ip] || {}).n).find(Boolean) || ''; }
       const u = ips.reduce((a, ip) => a + ((vol[ip] || [0])[0]), 0), g = ips.reduce((a, ip) => a + ((vol[ip] || [0, 0])[1]), 0);
-      return { n: d.n, ip: ips.join(', '), ipk: ips[0] || '', m: mac, how, u, d: g, ...x };
+      return { n, ip: ips.join(', '), ipk: ips[0] || '', m: mac, how, u, d: g, ...x };
     };
     const rows = [], aps = cl.aps || {};
     for (const s of cl.sta || []) {
@@ -1461,28 +1606,28 @@ class ClientsView {
     const weak = w.filter(r => r.sig < -70).length;
     $('#c-kpis', this.m).innerHTML =
       k('Всего клиентов', R.length, 'подключено сейчас') +
-      k('Wi-Fi 2,4 ГГц', w.filter(r => r.b === '2,4 ГГц').length, 'дальше, медленнее') +
-      k('Wi-Fi 5 ГГц', w.filter(r => r.b === '5 ГГц').length, 'быстрее, ближе') +
-      (w.some(r => r.b === '6 ГГц') ? k('Wi-Fi 6 ГГц', w.filter(r => r.b === '6 ГГц').length) : '') +
+      k('Wi-Fi 2,4 GHz', w.filter(r => r.b === '2,4 GHz').length, 'дальше, медленнее') +
+      k('Wi-Fi 5 GHz', w.filter(r => r.b === '5 GHz').length, 'быстрее, ближе') +
+      (w.some(r => r.b === '6 GHz') ? k('Wi-Fi 6 GHz', w.filter(r => r.b === '6 GHz').length) : '') +
       k('По проводу', R.length - w.length, 'LAN-порты роутера') +
-      k('Средний сигнал', sig.length ? `${Math.round(sig.reduce((a, b) => a + b, 0) / sig.length)}<small>дБм</small>` : '—', 'по Wi-Fi-клиентам') +
-      k('Слабый сигнал', `<span class="${weak ? 'sig-bad' : ''}">${weak}</span>`, 'хуже −70 дБм') +
+      k('Средний сигнал', sig.length ? `${Math.round(sig.reduce((a, b) => a + b, 0) / sig.length)}<small>dBm</small>` : '—', 'по Wi-Fi-клиентам') +
+      k('Слабый сигнал', `<span class="${weak ? 'sig-bad' : ''}">${weak}</span>`, 'хуже −70 dBm') +
       k('Получено', bytes(R.reduce((a, r) => a + r.d, 0)).replace(/ (\S+)$/, '<small>$1</small>'), `за ${rangeFor(this.range)}`) +
       k('Отправлено', bytes(R.reduce((a, r) => a + r.u, 0)).replace(/ (\S+)$/, '<small>$1</small>'), `за ${rangeFor(this.range)}`);
   }
   renderTab() {
-    const cols = [{ k: 'n', label: 'Хостнейм' }, { k: 'ipk', label: 'IP' }, { k: 'm', label: 'MAC', cls: 'hide-sm' }, { k: 'how', label: 'Подключение' },
-      { k: 'sig', label: 'Сигнал', n: 1, title: 'уровень сигнала Wi-Fi, дБм (ближе к 0 — лучше)' }, { k: 'tx', label: 'Канал ↓', n: 1, title: 'скорость канала к устройству, Мбит/с', cls: 'hide-sm' }, { k: 'rx', label: 'Канал ↑', n: 1, title: 'скорость канала от устройства, Мбит/с', cls: 'hide-sm' },
+    const cols = [{ k: 'n', label: 'Hostname' }, { k: 'ipk', label: 'IP' }, { k: 'm', label: 'MAC', cls: 'hide-sm' }, { k: 'how', label: 'Подключение' },
+      { k: 'sig', label: 'Сигнал', n: 1, title: 'уровень сигнала Wi-Fi, dBm (ближе к 0 — лучше)' }, { k: 'tx', label: 'Канал ↓', n: 1, title: 'скорость канала к устройству, Mbps', cls: 'hide-sm' }, { k: 'rx', label: 'Канал ↑', n: 1, title: 'скорость канала от устройства, Mbps', cls: 'hide-sm' },
       { k: 'ct', label: 'В сети', n: 1, title: 'сколько подключено к этой точке доступа' }, { k: 'inact', label: 'Простой', n: 1, title: 'сколько не передавало данных', cls: 'hide-sm' },
       { k: 'd', label: '↓ Получено', n: 1, title: 'из интернета за период' }, { k: 'u', label: '↑ Отправлено', n: 1, title: 'в интернет за период' }];
     const sc = s => s == null ? '' : s >= -60 ? 'sig-good' : s >= -70 ? 'sig-warn' : 'sig-bad';
-    const ag = s => s == null ? '—' : s < 60 ? `${Math.round(s)} с` : dur(s);
+    const ag = s => s == null ? '—' : s < 60 ? `${Math.round(s)} s` : dur(s);
     const t = $('#c-tab', this.m);
     $('#c-cnt', this.m).textContent = `${this.rows.length} ${plural(this.rows.length, 'устройство', 'устройства', 'устройств')} · щелчок по заголовку — сортировка`;
     t.innerHTML = thead(cols, this.sort) + (sortRows(this.rows, this.sort.k, this.sort.asc).map(r => `<tr>
       <td><span class="pname">${esc(r.n)}</span></td><td class="mono" style="white-space:nowrap">${esc(r.ip)}</td><td class="mono hide-sm muted" style="white-space:nowrap">${esc(r.m)}</td>
       <td class="role" title="${esc(r.ifn)}">${esc(r.how)}</td>
-      <td class="n ${sc(r.sig)}">${r.sig == null ? '—' : r.sig + ' дБм'}</td><td class="n hide-sm">${r.tx == null ? '—' : f1(r.tx)}</td><td class="n hide-sm">${r.rx == null ? '—' : f1(r.rx)}</td>
+      <td class="n ${sc(r.sig)}">${r.sig == null ? '—' : r.sig + ' dBm'}</td><td class="n hide-sm">${r.tx == null ? '—' : f1(r.tx)}</td><td class="n hide-sm">${r.rx == null ? '—' : f1(r.rx)}</td>
       <td class="n">${ag(r.ct)}</td><td class="n hide-sm">${ag(r.inact)}</td><td class="n">${bytes(r.d)}</td><td class="n">${bytes(r.u)}</td></tr>`).join('')
       || `<tr><td colspan="11" class="empty">К этому роутеру сейчас никто не подключён</td></tr>`);
     bindSort(t, this.sort, () => { lsSet('rmon.csort', this.sort); this.renderTab(); });
@@ -1494,20 +1639,20 @@ class ProcView {
   constructor(m, r) {
     this.m = m; this.ip = r.ip; this.pid = r.pid; this.st = r.st; this.tsort = { k: 'cpu', asc: false };
     crumbs([{ label: r.ip, href: hostHref(r.ip) }, { label: 'PID ' + r.pid }]);
-    setHelp('<div><b>Процесс</b></div><div>CPU и память процесса за последний час, его потоки (загрузка замеряется за 1 с), открытые порты и соединения. CPU — в % всей мощности роутера.</div>');
+    setHelp('<div><b>Процесс</b></div><div>CPU и память процесса за последний час, его потоки (загрузка замеряется за 1 s), открытые порты и соединения. CPU — в % всей мощности роутера.</div>');
     m.innerHTML = `<div id="p-banner"></div>
       <div class="panel-h" style="margin-bottom:var(--gap)"><div style="min-width:0"><h1 id="p-name">PID ${esc(r.pid)}</h1><div class="sub" id="p-sub"></div></div></div>
       <div class="panel" style="margin-bottom:var(--gap)" id="p-kpip"><div class="kpis" id="p-kpis"></div></div>
       <div class="grid g-eq" id="p-charts">
         <div class="panel"><div class="panel-h"><h2>CPU за час, %</h2><span class="muted" style="font-size:12px">% всей мощности роутера</span></div><div id="pc-cpu"></div></div>
-        <div class="panel"><div class="panel-h"><h2>Память (RSS) за час, МБ</h2></div><div id="pc-rss"></div></div>
+        <div class="panel"><div class="panel-h"><h2>Память (RSS) за час, MB</h2></div><div id="pc-rss"></div></div>
       </div>
       <div class="grid g-eq section" id="p-sec1">
         <div class="panel"><div class="panel-h"><h2>Сведения</h2></div><dl class="kv" id="p-kv"></dl></div>
         <div class="panel"><div class="panel-h"><h2>Память процесса</h2></div><dl class="kv" id="p-mem"></dl></div>
       </div>
       <div class="grid g-eq section" id="p-sec2">
-        <div class="panel"><div class="panel-h"><h2>Потоки</h2><span class="muted" style="font-size:12px">CPU за 1 с замера</span></div><div class="tbl-wrap"><table id="p-thr"></table></div></div>
+        <div class="panel"><div class="panel-h"><h2>Потоки</h2><span class="muted" style="font-size:12px">CPU за 1 s замера</span></div><div class="tbl-wrap"><table id="p-thr"></table></div></div>
         <div class="panel"><div class="panel-h"><h2>Сеть и связи</h2></div><div id="p-net"></div></div>
       </div>`;
     this.ch = { cpu: new Chart($('#pc-cpu', m), { tipFmt: pct }), rss: new Chart($('#pc-rss', m), { fmt: v => v >= 10 ? Math.round(v) + '' : (+v).toFixed(1).replace('.', ','), tipFmt: mb }) };
@@ -1545,11 +1690,11 @@ class ProcView {
     if (!j.alive) {
       $('#p-kpis', this.m).innerHTML =
         k('CPU средн.', u(pct(avg).replace('%', ' %')), 'пока работал') +
-        k('CPU пик', u(pct(Math.max(...cpu)).replace('%', ' %')), 'максимум за 10 с') +
+        k('CPU пик', u(pct(Math.max(...cpu)).replace('%', ' %')), 'максимум за 10 s') +
         k('Память (RSS)', u(kb(last(H.rss))), 'перед завершением') +
-        k('Наблюдался', esc(span > 0 ? dur(span + 10) : '≈ 10 с'), `до ${hhmmss(last(H.t))}`);
+        k('Наблюдался', esc(span > 0 ? dur(span + 10) : '≈ 10 s'), `до ${hhmmss(last(H.t))}`);
     } else $('#p-kpis', this.m).innerHTML =
-      k('CPU 10 с', u(pct(last(cpu)).replace('%', ' %')), `пик за час ${pct(cpu.length ? Math.max(...cpu) : null)}`) +
+      k('CPU 10 s', u(pct(last(cpu)).replace('%', ' %')), `пик за час ${pct(cpu.length ? Math.max(...cpu) : null)}`) +
       k('CPU средн.', u(pct(avg).replace('%', ' %')), span > 0 ? `за ${dur(span)} наблюдений` : 'данные копятся') +
       k('Память (RSS)', u(kb(rssNow)), drss ? `за час ${drss > 0 ? '+' : '−'}${kb(Math.abs(drss))}` : 'за час без изменений') +
       (j.alive ? k('В swap', u(kb(parseInt(st.VmSwap) || 0)), 'VmSwap') + k('Потоки', st.Threads || '—', '') + k('Файлы', j.fds, 'открытых дескрипторов') +
@@ -1634,9 +1779,9 @@ function addRouterWizard(onDone, ip0) {
       ${c.key ? '' : `<input type="password" id="w-pw" placeholder="пароль root на ${ip}" autocomplete="off" value="${esc(S.pw)}">`}
       <label class="ok"><input type="checkbox" data-ok="ssh" ${S.ok.ssh ? 'checked' : ''}> Понимаю и разрешаю вход на ${ip} под root</label></div>`;
     h += `<div class="access"><h3>2. Что изменится на ${ip}</h3><ul>
-        <li>Появятся папка <span class="mono">/etc/rmon-web</span> (около 150 КБ флеш-памяти) и служба <span class="mono">/etc/init.d/rmon</span>. Оба пути добавляются в <span class="mono">/etc/sysupgrade.conf</span>, чтобы пережить обновление прошивки.</li>
+        <li>Появятся папка <span class="mono">/etc/rmon-web</span> (около 150 KB флеш-памяти) и служба <span class="mono">/etc/init.d/rmon</span>. Оба пути добавляются в <span class="mono">/etc/sysupgrade.conf</span>, чтобы пережить обновление прошивки.</li>
         <li>В настройки uhttpd добавится отдельный веб-сервер на порту 8089. Веб-интерфейс LuCI при этом перезапустится и на 2–3 секунды станет недоступен.</li>
-        <li>Служба раз в 10 секунд читает данные о системе и процессах: около 1% CPU и до 4 МБ оперативной памяти.</li>
+        <li>Служба раз в 10 секунд читает данные о системе и процессах: около 1% CPU и до 4 MB оперативной памяти.</li>
         <li>В список роутеров на ${ip} будет записан ${esc(c.hostip)}, чтобы роутеры видели друг друга.</li></ul>
       <div class="risk"><p><b>Риски:</b></p><ul>
         <li>Страница RouterMon открывается без пароля. Любое устройство в сети ${lan} сможет видеть нагрузку ${ip}, список его процессов и их командные строки. Если какая-то программа получает пароль или токен прямо в командной строке, его тоже будет видно.</li>

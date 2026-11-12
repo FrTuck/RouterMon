@@ -96,64 +96,55 @@ function r1(x) { return sprintf("%.1f", x) }'
 #  1 ts 2 uptime 3 user 4 nice 5 system 6 idle 7 iowait 8 irq 9 softirq 10 MemTotal 11 MemAvailable 12 MemFree
 #  13 Buffers 14 Cached 15 SReclaimable 16 SUnreclaim 17 AnonPages 18 Shmem 19 SwapTotal 20 SwapFree
 #  21-23 load 24 процессов 25 t CPU 26 t Wi-Fi 27 ядер 28 pswpin 29 pswpout
+# Потоково: одна предыдущая строка в памяти, точки сразу дописываются в строки ответа (многомерные массивы
+# busybox awk на ARM очень медленные — прежний вариант тратил ~0,8 s CPU на час истории).
 series() {
   awk -F'\t' -v g="$2" "$AJ"'
-  NF >= 29 { n++; for (k = 1; k <= 29; k++) v[n, k] = $k }
+  function flush(  k) { np++; O[0] = O[0] (np > 1 ? "," : "") lt
+    for (k = 1; k <= 15; k++) { O[k] = O[k] (np > 1 ? "," : "") r1(S[k] / c); S[k] = 0 }
+    c = 0 }
+  BEGIN { if (g < 1) g = 1 }
+  NF >= 29 {
+    a = $3 + $4 + $5 + $6 + $7 + $8 + $9
+    if (have) { dt = a - pa; ds = $1 - p1
+      if (dt > 0 && ds > 0 && ds <= 600) {
+        S[1] += ($3 + $4 - p3 - p4) / dt * 100; S[2] += ($5 - p5) / dt * 100
+        S[3] += ($8 + $9 - p8 - p9) / dt * 100; S[4] += ($7 - p7) / dt * 100
+        ke = $10 - $12 - $13 - $14 - $15 - $17; if (ke < 0) ke = 0
+        S[5] += $17 / 1024; S[6] += ke / 1024; S[7] += ($14 + $13 - $18 + $15) / 1024; S[8] += $18 / 1024; S[9] += $12 / 1024
+        S[10] += $11 / 1024; S[11] += ($19 - $20) / 1024; S[12] += $21; S[13] += $25 / 1000; S[14] += $26 / 1000
+        sw = ($28 + $29 - p28 - p29) * 4 / 1024 / ds; S[15] += (sw < 0 ? 0 : sw)
+        lt = $1; if (++c == g) flush() } }
+    have = 1; pa = a; p1 = $1; p3 = $3; p4 = $4; p5 = $5; p7 = $7; p8 = $8; p9 = $9; p28 = $28; p29 = $29 }
   END {
-    m = 0
-    for (i = 2; i <= n; i++) {
-      a = 0; b = 0; for (k = 3; k <= 9; k++) { a += v[i, k]; b += v[i - 1, k] }
-      dt = a - b; ds = v[i, 1] - v[i - 1, 1]
-      if (dt <= 0 || ds <= 0 || ds > 600) continue
-      m++; T[m] = v[i, 1]
-      X[m, 1] = (v[i, 3] + v[i, 4] - v[i - 1, 3] - v[i - 1, 4]) / dt * 100
-      X[m, 2] = (v[i, 5] - v[i - 1, 5]) / dt * 100
-      X[m, 3] = (v[i, 8] + v[i, 9] - v[i - 1, 8] - v[i - 1, 9]) / dt * 100
-      X[m, 4] = (v[i, 7] - v[i - 1, 7]) / dt * 100
-      tot = v[i, 10]; fr = v[i, 12]; bu = v[i, 13]; ca = v[i, 14]; sr = v[i, 15]; an = v[i, 17]; sh = v[i, 18]
-      ke = tot - fr - bu - ca - sr - an; if (ke < 0) ke = 0
-      X[m, 5] = an / 1024; X[m, 6] = ke / 1024; X[m, 7] = (ca + bu - sh + sr) / 1024; X[m, 8] = sh / 1024; X[m, 9] = fr / 1024
-      X[m, 10] = v[i, 11] / 1024
-      X[m, 11] = (v[i, 19] - v[i, 20]) / 1024
-      X[m, 12] = v[i, 21]
-      X[m, 13] = v[i, 25] / 1000; X[m, 14] = v[i, 26] / 1000
-      sw = (v[i, 28] + v[i, 29] - v[i - 1, 28] - v[i - 1, 29]) * 4 / 1024 / ds; X[m, 15] = (sw < 0 ? 0 : sw)
-    }
-    if (g < 1) g = 1
-    np = 0
-    for (s = 1; s <= m; s += g) {
-      np++; e = s + g - 1; if (e > m) e = m
-      Y[np, 0] = T[e]
-      for (k = 1; k <= 15; k++) { z = 0; for (i = s; i <= e; i++) z += X[i, k]; Y[np, k] = z / (e - s + 1) }
-    }
+    if (c) flush()
     split("t user sys irq io anon kern cache shm free avail swap load temp wtemp swapio", nm, " ")
     printf "{"
-    for (k = 0; k <= 15; k++) {
-      printf "%s\"%s\":[", (k ? "," : ""), nm[k + 1]
-      for (i = 1; i <= np; i++) printf "%s%s", (i > 1 ? "," : ""), (k ? r1(Y[i, k]) : Y[i, k])
-      printf "]"
-    }
+    for (k = 0; k <= 15; k++) printf "%s\"%s\":[%s]", (k ? "," : ""), nm[k + 1], O[k]
     printf "}"
   }' "$1"
 }
 
-# netseries <файл net> <группа> — скорость по интерфейсам, Мбит/с, и объём за окно, байт:
+# netseries <файл net> <группа> — скорость по интерфейсам, Mbps, и объём за окно, байт:
 #   {"eth1":{"t":[],"rx":[],"tx":[],"brx":принято,"btx":отдано},...}
+# Потоково, как series: по интерфейсу копятся суммы группы и сразу дописываются в строки ответа.
 netseries() {
   awk -F'\t' -v g="$2" "$AJ"'
-  { if ($2 in lt) { ds = $1 - lt[$2]; drx = $3 - lrx[$2]; dtx = $4 - ltx[$2]
-      if (ds > 0 && ds <= 600 && drx >= 0 && dtx >= 0) { c = ++cnt[$2]; T[$2, c] = $1; RX[$2, c] = drx * 8 / ds / 1e6; TX[$2, c] = dtx * 8 / ds / 1e6; BR[$2] += drx; BT[$2] += dtx } }
-    else ord[++ni] = $2
-    lt[$2] = $1; lrx[$2] = $3; ltx[$2] = $4 }
+  function flush(f) { sp = (f in TS) ? "," : ""
+    TS[f] = TS[f] sp le[f]; RS[f] = RS[f] sp sprintf("%.3f", A[f] / N[f]); XS[f] = XS[f] sp sprintf("%.3f", B[f] / N[f])
+    A[f] = 0; B[f] = 0; N[f] = 0 }
+  BEGIN { if (g < 1) g = 1 }
+  { f = $2
+    if (f in lt) { ds = $1 - lt[f]; drx = $3 - lrx[f]; dtx = $4 - ltx[f]
+      if (ds > 0 && ds <= 600 && drx >= 0 && dtx >= 0) {
+        A[f] += drx * 8 / ds / 1e6; B[f] += dtx * 8 / ds / 1e6; BR[f] += drx; BT[f] += dtx; le[f] = $1
+        if (++N[f] == g) flush(f) } }
+    else ord[++ni] = f
+    lt[f] = $1; lrx[f] = $3; ltx[f] = $4 }
   END {
-    if (g < 1) g = 1
     printf "{"; o = 0
-    for (q = 1; q <= ni; q++) { f = ord[q]; m = cnt[f]; if (!m) continue
-      printf "%s%s:{", (o++ ? "," : ""), j(f); ts = ""; rs = ""; xs = ""
-      for (s = 1; s <= m; s += g) { e = s + g - 1; if (e > m) e = m; a = 0; b = 0
-        for (i = s; i <= e; i++) { a += RX[f, i]; b += TX[f, i] }
-        ts = ts (ts == "" ? "" : ",") T[f, e]; rs = rs (rs == "" ? "" : ",") sprintf("%.3f", a / (e - s + 1)); xs = xs (xs == "" ? "" : ",") sprintf("%.3f", b / (e - s + 1)) }
-      printf "\"t\":[%s],\"rx\":[%s],\"tx\":[%s],\"brx\":%.0f,\"btx\":%.0f}", ts, rs, xs, BR[f], BT[f] }
+    for (q = 1; q <= ni; q++) { f = ord[q]; if (N[f]) flush(f); if (!(f in TS)) continue
+      printf "%s%s:{\"t\":[%s],\"rx\":[%s],\"tx\":[%s],\"brx\":%.0f,\"btx\":%.0f}", (o++ ? "," : ""), j(f), TS[f], RS[f], XS[f], BR[f], BT[f] }
     printf "}"
   }' "$1"
 }
@@ -375,10 +366,15 @@ unhide)
   ;;
 
 sum)
+  # графики и топ процессов меняются только с новой записью сборщика (раз в 10 s) — считаются один раз на запись
+  sc="$C/sum.$(date -r "$D/sys.tsv" +%s 2>/dev/null)"
+  if [ ! -s "$sc" ]; then rm -f "$C"/sum.*
+    { printf ',"hist":'; series "$D/sys.tsv" 6
+      printf ',"net":'; [ -s "$D/net.tsv" ] && tail -n 200 "$D/net.tsv" | netseries /dev/stdin 1 || printf '{}'
+      printf ',"top":'; procs 8 $(lastfiles 360); } >"$sc.tmp" && mv "$sc.tmp" "$sc"
+  fi
   hdr; printf '{"ok":true,'; info
-  printf ',"hist":'; series "$D/sys.tsv" 6
-  printf ',"net":'; [ -s "$D/net.tsv" ] && tail -n 200 "$D/net.tsv" | netseries /dev/stdin 1 || printf '{}'
-  printf ',"top":'; procs 8 $(lastfiles 360)
+  cat "$sc" 2>/dev/null
   printf '}\n'
   ;;
 
@@ -393,7 +389,16 @@ host|traffic)
   # до часа — подробная история по 10 с; больше — по 1 мин, на графике не больше ~360 точек
   if [ "$m" -le 60 ] && [ $all = 0 ]; then NF_=$D/net.tsv; g=1; ofs=10; else NF_=$D/net1m.tsv; g=$(( (m + 359) / 360 )); ofs=60; fi
   # netwin [интерфейс] — сеть за период (только этот интерфейс, если задан)
-  netwin() { if [ -s "$NF_" ]; then awk -F'\t' -v t=$((now - m * 60 - ofs)) -v i="$1" '$1 >= t && (i == "" || $2 == i)' "$NF_" | netseries /dev/stdin $g; else printf '{}'; fi; }
+  # Результат кэшируется до следующей записи сборщика в файл истории (10-секундная — раз в 10 s, минутная — раз
+  # в минуту): несколько вкладок, роутеров и переключения вкладок не пересчитывают одно и то же
+  netwin() {
+    [ -s "$NF_" ] || { printf '{}'; return; }
+    nk="$C/nw.$m.$all.${1:-all}"; nc_="$nk.$(date -r "$NF_" +%s)"
+    if [ ! -s "$nc_" ]; then rm -f "$nk".*
+      awk -F'\t' -v t=$((now - m * 60 - ofs)) -v i="$1" '$1 >= t && (i == "" || $2 == i)' "$NF_" | netseries /dev/stdin $g >"$nc_.tmp" && mv "$nc_.tmp" "$nc_"
+    fi
+    cat "$nc_" 2>/dev/null || printf '{}'
+  }
 case "$A" in traffic)
   # трафик: w=1 — только канал по маршруту по умолчанию (для сводки по всем роутерам), иначе все интерфейсы и сведения о них
   wan=$(ip route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
@@ -442,11 +447,11 @@ case "$A" in traffic)
 esac
   hdr; printf '{"ok":true,'; info
   [ $all = 1 ] && printf ',"all":true'
-  if [ $g = 1 ] && [ $ofs = 10 ]; then
-    printf ',"range":%d,"hist":' "$m"; tail -n $((m * 6 + 1)) "$D/sys.tsv" 2>/dev/null | series /dev/stdin 1
-  else
-    printf ',"range":%d,"hist":' "$m"; tail -n $((m + 1)) "$D/sys1m.tsv" 2>/dev/null | series /dev/stdin $g
-  fi
+  # графики системы — тоже из кэша до следующей записи сборщика
+  if [ $g = 1 ] && [ $ofs = 10 ]; then SF=$D/sys.tsv; sn=$((m * 6 + 1)); else SF=$D/sys1m.tsv; sn=$((m + 1)); fi
+  sk="$C/hs.$m.$all"; sc="$sk.$(date -r "$SF" +%s 2>/dev/null)"
+  if [ ! -s "$sc" ]; then rm -f "$sk".*; tail -n $sn "$SF" 2>/dev/null | series /dev/stdin $g >"$sc.tmp" && mv "$sc.tmp" "$sc"; fi
+  printf ',"range":%d,"hist":' "$m"; cat "$sc" 2>/dev/null || printf 'null'
   printf ',"net":'; netwin
   # таблица процессов меняется только с новым снимком (раз в 10 с) — считаем один раз на снимок
   # (переключение периода и несколько открытых вкладок не пересчитывают её заново)
@@ -490,6 +495,10 @@ clients)
     brctl showmacs "$br" 2>/dev/null | awk -v PM="$pm" -v WL="$WL" 'BEGIN { n = split(PM, a, "\n"); for (i = 1; i <= n; i++) { split(a[i], b, " "); P[b[1]] = b[2] } }
       NR > 1 && $3 == "no" && $4 + 0 < 300 { p = P[$1]; if (p ~ /^(lan|eth|wan)/ && !index(WL, " " p " ")) print p, toupper($2) }'
   done | sort -u | awk -v k0=0 '{ if ($1 != cur) { printf "%s\"%s\":[", (cur != "" ? "]," : ""), $1; cur = $1; n = 0 } printf "%s\"%s\"", (n++ ? "," : ""), $2 } END { if (cur != "") printf "]" }'
+  # мост каждого интерфейса (точки доступа, порта): по мосту страница узнаёт подсеть, в которой сейчас клиент,
+  # и из нескольких IP устройства (разные сети в /etc/config/dhcp) показывает нужный
+  printf '},"br":{'
+  ip -o link show 2>/dev/null | awk '{ n = $2; sub(/:$/, "", n); sub(/@.*/, "", n); for (i = 3; i < NF; i++) if ($i == "master") printf "%s\"%s\":\"%s\"", (k++ ? "," : ""), n, $(i + 1) }'
   printf '}}\n'
   ;;
 
@@ -497,10 +506,11 @@ top)
   # топ удалённых адресов за период (m — минуты, 15…1440 или all) по 5-минутным корзинам сборщика.
   # Строка — домен (или IP, если домен неизвестен): объём отправленного и полученного, число IP,
   # устройства {"IP устройства":[отправлено,получено]} («@» — сам роутер).
-  # Считается раз в минуту на период, ответ кэшируется.
+  # Ответ кэшируется: до часа — на минуту, для длинных периодов — на 5 минут (корзины и так по 5 минут, а полный
+  # пересчёт суток читает ~40 тысяч строк — несколько секунд CPU).
   m=$(qp m); [ "$m" = all ] && m=1440; case "$m" in ''|*[!0-9]*) m=60 ;; esac
   [ "$m" -lt 15 ] && m=15; [ "$m" -gt 1440 ] && m=1440
-  now=$(date +%s); TR=$D/tr; tc="$C/top.$m.$((now / 60))"
+  now=$(date +%s); TR=$D/tr; tq=60; [ "$m" -gt 60 ] && tq=300; tc="$C/top.$m.$((now / tq))"
   if [ ! -s "$tc" ]; then
     rm -f "$C"/top.$m.*
     b0=$(( (now - m * 60) / 300 )); fs=
@@ -511,6 +521,8 @@ top)
         "$( [ "$(uci -q get dhcp.@dnsmasq[0].logfacility)" = /tmp/rmon-dns.log ] && echo true || echo false )"
       # устройства: IP → {имя, MAC}. Имя — только из статических хостов /etc/config/dhcp (по IP, иначе по MAC);
       # незнакомому устройству имя пустое. MAC — из ARP-таблицы и аренд DHCP.
+      # подсети мостов этого роутера: {"br-lan":"192.168.1.1/24",...}
+      printf ',"nets":{%s}' "$(ip -4 -o addr show 2>/dev/null | awk '$2 ~ /^br-/ { printf "%s\"%s\":\"%s\"", (k++ ? "," : ""), $2, $4 }')"
       printf ',"self":{"m":%s},"devs":{' "$(js "$(cat /sys/class/net/br-lan/address 2>/dev/null | tr a-f A-F)")"
       lf=/tmp/dhcp.leases; [ -f "$lf" ] || lf=/dev/null
       uci -q show dhcp 2>/dev/null | awk -v ARP=/proc/net/arp -v LS="$lf" "$AJ"'

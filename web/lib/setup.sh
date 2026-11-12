@@ -46,7 +46,7 @@ command -v uhttpd >/dev/null || err "на роутере нет веб-серв�
 [ -x /etc/init.d/uhttpd ] || err "нет службы /etc/init.d/uhttpd"
 [ -f "$PKG/cgi-bin/api" ] && [ -f "$PKG/lib/collect.sh" ] || err "пакет неполный: $PKG"
 free=$(df -k /overlay 2>/dev/null | awk 'NR == 2 { print $4 }')
-[ -z "$free" ] || [ "$free" -gt 400 ] || err "на роутере осталось ${free} КБ флеш-памяти, нужно хотя бы 400 КБ"
+[ -z "$free" ] || [ "$free" -gt 400 ] || err "на роутере осталось ${free} KB флеш-памяти, нужно хотя бы 400 KB"
 if netstat -ltn 2>/dev/null | grep -q ":$PORT " && ! uci -q get uhttpd.rmon >/dev/null; then
   err "порт $PORT уже занят другой программой"
 fi
