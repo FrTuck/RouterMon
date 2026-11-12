@@ -52,6 +52,9 @@ if (-not $Hosts) {
   $Hosts = @($in -split '[,; ]+' | Where-Object { $_ })
   if (-not $Hosts) { return }
 }
+# адрес роутера попадает в командную строку ssh — допускаем только IP или имя хоста
+$HostRe = '^[A-Za-z0-9][A-Za-z0-9.:-]*$'
+foreach ($h in $Hosts) { if ($h -notmatch $HostRe) { throw "Недопустимый адрес роутера: '$h'" } }
 
 # ключи: указанный или все ~/.ssh/id_* (кроме .pub); если ни один не подойдёт, ssh спросит пароль
 $sshArgs = @('-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=accept-new')
@@ -66,6 +69,7 @@ foreach ($k in $keys) { $sshArgs += @('-i', $k) }
 function Quote([string]$s) { if ($s -match '[\s"]') { '"' + $s + '"' } else { $s } }
 # ssh root@<h> <команда>, stdin — файл (бинарно, без перекодировки PowerShell)
 function Invoke-Ssh([string]$H, [string]$Cmd, [string]$StdinFile) {
+  if ($H -notmatch $HostRe) { throw "Недопустимый адрес роутера: '$H'" }
   $argLine = (($sshArgs | ForEach-Object { Quote $_ }) -join ' ') + " root@$H " + '"' + $Cmd + '"'
   if ($IsWin) {
     $redir = if ($StdinFile) { " < `"$StdinFile`"" } else { '' }

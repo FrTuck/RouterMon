@@ -15,6 +15,10 @@ if [ $# -eq 0 ]; then
   read -r ip; [ -n "$ip" ] || ip=$gw; set -- $ip
 fi
 [ $# -gt 0 ] || exit 0
+# адрес роутера попадает в команду ssh — допускаем только IP или имя хоста
+for h in "$@"; do
+  case $h in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9.:-]*) echo "Недопустимый адрес роутера: '$h'" >&2; exit 1 ;; esac
+done
 SSH="ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
 [ -n "$RMON_KEY" ] && SSH="$SSH -i $RMON_KEY"
 
