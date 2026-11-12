@@ -221,7 +221,7 @@ dialog.modal::backdrop { background: rgba(0,0,0,.45); }
 .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; color: var(--ink); min-width: 0; flex: 0 1 auto; }
 .badge span { overflow: hidden; text-overflow: ellipsis; }
 .badge svg { width: 12px; height: 12px; flex: none; }
-.badges { display: flex; gap: 6px; flex-wrap: nowrap; margin-left: auto; justify-content: flex-end; min-width: 0; flex: 0 1 auto; }
+.badges { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; justify-content: flex-end; min-width: 0; flex: 0 1 auto; }
 .card-h .badges { max-width: 62%; }
 
 /* таблицы */
@@ -402,7 +402,7 @@ const rangeLabel = m => m === 0 ? 'Всё' : m < 60 ? `${m} ${plural(m, 'мин�
 const rangeFor = m => m === 0 ? 'всё время наблюдений' : m < 60 ? `${m} ${plural(m, 'минуту', 'минуты', 'минут')}` : rangeLabel(m);
 
 // ---------- светофор: пороги жёлтого и красного (те же, что у значков состояния) ----------
-const TH = { cpu: [70, 90], mem: [80, 90], swap: [50, 80], temp: [85, 95] };
+const TH = { cpu: [70, 95], mem: [80, 95], swap: [60, 90], temp: [85, 95] };
 const lvl = (v, th) => (v == null || isNaN(v)) ? 'none' : v >= th[1] ? 'bad' : v >= th[0] ? 'warn' : 'good';
 const tlText = (v, th) => `color:var(--tl-${lvl(v, th)}-t)`;
 // модули Wi-Fi для циферблата t° Wi-Fi: дуги (первая — внешняя) и строки подсказки
@@ -521,7 +521,7 @@ const ICON = {
 const TRASH = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M6 4V2.6h4V4M4 4l.7 9.4h6.6L12 4M6.6 6.6v4.6M9.4 6.6v4.6"/></svg>';
 const trashBtn = (ip, name) => ip === lanInfo.self ? '' :
   `<button type="button" class="trash" data-forget="${esc(ip)}" title="Убрать ${esc(name)} с главной — вернуть можно в списке «+ Добавить роутер»" aria-label="Убрать ${esc(name)} с главной">${TRASH}</button>`;
-const badge = (lvl, text, title = '') => `<span class="badge" title="${esc(text + (title ? ': ' + title : ''))}">${ICON[lvl]}<span>${esc(text)}</span></span>`;
+const badge = (lvl, text, title = '') => `<span class="badge" title="${esc(title || text)}">${ICON[lvl]}<span>${esc(text)}</span></span>`;
 function curOf(j) {
   const c = j.cur || {}, g = k => last(c[k]);
   const total = (g('anon') || 0) + (g('kern') || 0) + (g('cache') || 0) + (g('shm') || 0) + (g('free') || 0);
@@ -529,20 +529,36 @@ function curOf(j) {
     total, avail: g('avail'), usedPct: total ? (total - g('avail')) / total * 100 : null, anon: g('anon'), kern: g('kern'), swap: g('swap'),
     load: g('load'), temp: g('temp'), wtemp: g('wtemp'), ok: c.t && c.t.length > 0 };
 }
+// значки состояния: [уровень, текст значка, подсказка при наведении]; пороги совпадают с цветом циферблатов (TH)
 function health(j) {
   const c = curOf(j), out = [];
-  if (j.age < 0 || j.age > 60 || !c.ok) out.push(['critical', 'Сборщик не работает', 'Нет свежих данных от службы rmon на роутере']);
+  if (j.age < 0 || j.age > 60 || !c.ok) out.push(['critical', 'Статистика не собирается', 'Сборщик статистики не работает']);
   else {
-    const availPct = c.total ? c.avail / c.total * 100 : 100;
-    if (availPct < 10) out.push(['critical', 'Мало памяти', `Доступно ${mb(c.avail)} из ${mb(c.total)}`]);
-    else if (availPct < 20) out.push(['warning', 'Памяти мало', `Доступно ${mb(c.avail)} из ${mb(c.total)}`]);
-    if (c.cpu >= 90) out.push(['serious', 'CPU загружен', `CPU ${pct(c.cpu)}`]);
-    else if (c.cpu >= 70) out.push(['warning', 'CPU нагружен', `CPU ${pct(c.cpu)}`]);
-    if (c.temp >= 95) out.push(['critical', 'Перегрев', `CPU ${f1(c.temp)} °C`]);
-    else if (c.temp >= 85) out.push(['warning', 'Горячо', `CPU ${f1(c.temp)} °C`]);
-    for (const d of j.disks || []) if (d.mp !== '/' && d.used / d.total > 0.95) out.push(['warning', 'Диск заполнен', `${d.mp}: ${Math.round(d.used / d.total * 100)}%`]);
+    const freePct = c.total ? c.avail / c.total * 100 : 100, ram = `Доступно ${mb(c.avail)} из ${mb(c.total)}`;
+    if (freePct < 5) out.push(['critical', 'RAM: Свободная память закончилась', ram]);
+    else if (freePct < 20) out.push(['warning', 'RAM: Свободной памяти мало', ram]);
+    if (c.cpu >= TH.cpu[1]) out.push(['serious', 'CPU: перенагружен', `CPU ${pct(c.cpu)}`]);
+    else if (c.cpu >= TH.cpu[0]) out.push(['warning', 'CPU: повышенная нагрузка', `CPU ${pct(c.cpu)}`]);
+    if (c.temp >= TH.temp[1]) out.push(['critical', 't° CPU: перегрев', `CPU ${f1(c.temp)} °C`]);
+    else if (c.temp >= TH.temp[0]) out.push(['warning', 't° CPU: выше нормы', `CPU ${f1(c.temp)} °C`]);
+    if (c.wtemp >= TH.temp[1]) out.push(['critical', 't° WiFi: перегрев', `Wi-Fi ${f1(c.wtemp)} °C`]);
+    else if (c.wtemp >= TH.temp[0]) out.push(['warning', 't° WiFi: выше нормы', `Wi-Fi ${f1(c.wtemp)} °C`]);
+    const swT = (j.swapTotal || 0) / 1024, swP = swT > 0 ? c.swap / swT * 100 : 0, sw = `Занято ${mb(c.swap)} из ${mb(swT)}.`;
+    if (swP >= TH.swap[1]) out.push(['critical', 'Swap: почти полон', `${sw} Порог: ${TH.swap[1]}%`]);
+    else if (swP > TH.swap[0]) out.push(['warning', 'Swap: повышенное использование', `${sw} Порог: ${TH.swap[0]} / ${TH.swap[1]}%`]);
+    const nc = j.ncpu || 1, cores = `${nc} ${nc === 1 ? 'ядре' : 'ядрах'}`, la = (+c.load || 0).toFixed(1).replace('.', ',');
+    if (c.load >= nc * 1.5) out.push(['critical', `Load: очередь CPU · ${la}`, `Средняя загрузка за 1 мин при ${cores}. Порог: ${f1(nc * 1.5)}`]);
+    else if (c.load >= nc) out.push(['warning', `Load: очередь CPU · ${la}`, `Средняя загрузка за 1 мин при ${cores}. Порог: ${nc}`]);
+    for (const d of j.disks || []) {
+      const p = d.total ? d.used / d.total * 100 : 0, ps = Math.round(p);
+      if (d.mp === '/') {
+        if (p >= 98) out.push(['critical', 'Флеш-память закончилась', `Раздел прошивки «/» занят на ${ps}%. Порог: 98%`]);
+        else if (p >= 92) out.push(['serious', 'Флеш-памяти мало', `Раздел прошивки «/» занят на ${ps}%. Порог: 92%`]);
+      } else if (p >= 98) out.push(['critical', 'Диск полностью заполнен', `${d.mp}: ${ps}%`]);
+      else if (p >= 95) out.push(['serious', 'Диск почти заполнен', `${d.mp}: ${ps}%`]);
+    }
   }
-  if (!out.length) out.push(['good', 'Норма', '']);
+  if (!out.length) out.push(['good', 'OK', 'Все показатели в пределах нормы']);
   return out;
 }
 
@@ -921,7 +937,7 @@ class Overview {
   card(r) {
     if (!r) return '';
     // недоступный роутер: те же 6 блоков, что у обычной карточки (subgrid), чтобы ряд не съезжал
-    if (r.e) return `<div class="panel card" data-ip="${r.ip}" data-down="1"><div class="card-h"><div class="t"><div class="name">${esc(r.ip)}</div><div class="sub">не отвечает</div></div><div class="badges">${badge('critical', 'Нет связи', r.e.message)}</div></div>
+    if (r.e) return `<div class="panel card" data-ip="${r.ip}" data-down="1"><div class="card-h"><div class="t"><div class="name">${esc(r.ip)}</div><div class="sub">не отвечает</div></div><div class="badges">${badge('critical', 'Нет связи', 'Связь с роутером потеряна' + (r.e.message ? ` (${r.e.message})` : ''))}</div></div>
       <div class="muted">${esc(r.e.message)}. Роутер выключен, сменил адрес или RouterMon на нём не установлен.</div><div></div><div></div><div></div>
       <div class="foot">${trashBtn(r.ip, r.ip)}<span></span></div></div>`;
     const j = r.j, c = curOf(j), H = j.hist || {};
@@ -965,7 +981,7 @@ class Overview {
         <div class="spark"><div class="l"><span>CPU за час</span><span class="num">макс ${pct(Math.max(0, ...cpuH))}</span></div>${spark(cpuH, 'var(--s1)', 100)}</div>
         <div class="spark"><div class="l"><span>RAM за час</span><span class="num">макс ${pct(Math.max(0, ...memUsed))}</span></div>${spark(memUsed, 'var(--s2)', 100)}</div>
       </div>
-      ${disks.length ? '' : '<div></div>'}${disks.length ? `<div>${disks.map(d => `<div class="disk"><span class="mono">${esc(d.mp)}</span><span class="num ink2">${bytesK(d.used)} из ${bytesK(d.total)}</span><div class="meter"><i style="width:${(d.used / d.total * 100).toFixed(1)}%;background:${d.used / d.total > .9 ? 'var(--serious)' : 'var(--s1)'}"></i></div></div>`).join('')}</div>` : ''}
+      ${disks.length ? '' : '<div></div>'}${disks.length ? `<div>${disks.map(d => `<div class="disk"><span class="mono">${esc(d.mp)}</span><span class="num ink2">${bytesK(d.used)} из ${bytesK(d.total)}</span><div class="meter"><i style="width:${(d.used / d.total * 100).toFixed(1)}%;background:${d.used / d.total >= .98 ? 'var(--critical)' : d.used / d.total >= .95 ? 'var(--serious)' : 'var(--s1)'}"></i></div></div>`).join('')}</div>` : ''}
       <div class="sparks">
         ${miniTop('a')}
         ${miniTop('b')}
