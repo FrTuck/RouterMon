@@ -19,9 +19,10 @@
   --tl-good: #0ca30c; --tl-warn: #fab219; --tl-bad: #d03b3b; --tl-none: var(--axis);
   --tl-good-t: #087a08; --tl-warn-t: #a36a00; --tl-bad-t: #c2302f; --tl-none-t: var(--muted);
   --tl-neu: var(--s1); --tl-neu-t: var(--ink);
+  --tl-lime: #8fd14f; --tl-lime-t: #4f8a14;   /* «норма» второй величины на общем циферблате (Wi-Fi) */
 }
-@media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) { --tl-good-t: #34c234; --tl-warn-t: #fab219; --tl-bad-t: #f06262; } }
-:root[data-theme="dark"] { --tl-good-t: #34c234; --tl-warn-t: #fab219; --tl-bad-t: #f06262; }
+@media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) { --tl-good-t: #34c234; --tl-warn-t: #fab219; --tl-bad-t: #f06262; --tl-lime-t: #a6e05a; } }
+:root[data-theme="dark"] { --tl-good-t: #34c234; --tl-warn-t: #fab219; --tl-bad-t: #f06262; --tl-lime-t: #a6e05a; }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
@@ -343,6 +344,8 @@ tr.gone td { color: var(--muted); }
 .gtip { display: none; position: absolute; top: 30px; left: 50%; transform: translateX(-50%); z-index: 6; width: max-content; max-width: min(270px, 86vw);
   background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.5; text-align: left; color: var(--ink-2); box-shadow: 0 6px 20px rgba(0,0,0,.18); cursor: default; }
 .gtip .gt-go { color: var(--link); margin-top: 4px; }
+.gtip .gt-leg { margin-top: 4px; display: grid; grid-template-columns: auto 1fr; gap: 1px 6px; align-items: center; }
+.gtip .gt-leg i { width: 10px; height: 10px; border-radius: 50%; }
 .gauge .qbtn:hover + .gtip, .gauge .qbtn:focus-visible + .gtip, .gauge.open .gtip { display: block; }
 .gauge:first-child .gtip { left: 0; transform: none; }
 .gauge:last-child .gtip { left: auto; right: 0; transform: none; }
@@ -466,6 +469,8 @@ const wArcs = j => (j.wmods || []).map(w => ({ n: w.n, short: w.n.replace(/\s*GH
 const wTip = j => { const a = wArcs(j); return a.length > 1
   ? a.map((w, i) => `${i ? 'Внутренняя' : 'Внешняя'} шкала — ${w.n}: ${f1(w.v)} °C.`).join(' ')
   : a.length && a[0].n.includes('+') ? `Один датчик на весь радиочип (${a[0].n}): оба диапазона работают на одном чипе.` : ''; };
+// уровень дуги общего циферблата: «норма» может иметь свой цвет (a.ok: 'lime' — Wi-Fi), предупреждение и авария общие
+const arcLvl = (a, th) => { const l = lvl(a.v, th); return l === 'good' && a.ok ? a.ok : l; };
 // циферблат в стиле Grafana: дуга 240°, снаружи тонкая шкала порогов, число в центре окрашено по светофору
 function gauge(o) {
   // o.neutral — величина без «хорошо/плохо» (скорость канала): синяя дуга, обычный цвет цифры, шкала порогов серая
@@ -482,7 +487,8 @@ function gauge(o) {
   const txt = o.text != null ? o.text : (isNaN(v) ? '—' : (o.fmt || f1)(v) + (o.unit ? ' ' + o.unit : ''));
   const m = String(txt).match(/^(\S+)\s(.+)$/), big = m ? m[1] : txt, unit = m ? m[2] : '';
   // пояснения — во всплывающей подсказке «?» (наведение или щелчок), чтобы под циферблатами не было мелкого текста
-  const tip = [o.title, o.sub, o.sub2].filter(Boolean).map(s => `<div>${esc(s)}</div>`).join('') + (o.goText ? `<div class="gt-go">Щёлкните по циферблату — ${esc(o.goText)}</div>` : '');
+  const tip = [o.title, o.sub, o.sub2].filter(Boolean).map(s => `<div>${esc(s)}</div>`).join('') +
+    (o.legend ? `<div class="gt-leg">${o.legend.map(([c, t]) => `<i style="background:${c}"></i><span>${esc(t)}</span>`).join('')}</div>` : '') + (o.goText ? `<div class="gt-go">Щёлкните по циферблату — ${esc(o.goText)}</div>` : '');
   return `<div class="gauge${o.go ? ' go' : ''}" data-key="${esc(o.key || o.label)}" ${o.ip ? `data-ip="${esc(o.ip)}"` : ''} ${o.go ? `role="link" tabindex="0" data-go='${esc(JSON.stringify(o.go))}'` : ''}>
     <div class="gh"><span class="gl">${esc(o.label)}</span>${tip ? `<button type="button" class="qbtn" aria-label="Пояснение: ${esc(o.label)}">?</button><div class="gtip" role="tooltip">${tip}</div>` : ''}</div>
     <svg viewBox="0 0 120 92" role="img" aria-label="${esc(o.label)}: ${esc(txt)}">
@@ -490,15 +496,38 @@ function gauge(o) {
       <path d="${arc(0, t0, 49)}" stroke="var(--tl-good)" stroke-width="3" fill="none"/>
       <path d="${arc(t0, t1, 49)}" stroke="var(--tl-warn)" stroke-width="3" fill="none"/>
       <path d="${arc(t1, 1, 49)}" stroke="var(--tl-bad)" stroke-width="3" fill="none"/>`}
-      ${multi ? o.arcs.map((a, i) => { const r = 43 - i * 9, al = lvl(a.v, o.th);
+      ${multi ? o.arcs.map((a, i) => { const r = 43 - i * 9;
         return `<path d="${arc(0, 1, r)}" stroke="var(--surface-2)" stroke-width="7" fill="none"/>
-      <path d="${arc(0, fr(a.v), r)}" stroke="var(--tl-${al})" stroke-width="7" fill="none"><title>${esc(a.n)}: ${esc(f1(a.v))} ${esc(o.unit || '')}</title></path>`; }).join('') + `
-      <text x="60" y="90" text-anchor="middle" class="gm">${o.arcs.map(a => `${esc(a.short)}: ${esc(Math.round(a.v))}°`).join('  ')}</text>` : `
+      <path d="${arc(0, fr(a.v), r)}" stroke="var(--tl-${arcLvl(a, o.th)})" stroke-width="7" fill="none"><title>${esc(a.n)}: ${esc(f1(a.v))} ${esc(o.unit || '')}</title></path>`; }).join('') + `
+      ${o.arcs.map((a, i) => `<text x="60" y="${(64 - (o.arcs.length - 1) * 8.5 + i * 17).toFixed(1)}" text-anchor="middle" class="gv gv2" style="fill:var(--tl-${arcLvl(a, o.th)}-t)">${esc(f1(a.v))}</text>`).join('')}` : `
       <path d="${arc(0, 1, 40)}" stroke="var(--surface-2)" stroke-width="11" fill="none"/>
-      <path d="${isNaN(v) ? '' : arc(0, fr(v), 40)}" stroke="var(--tl-${l})" stroke-width="11" fill="none"/>`}
-      <text x="60" y="${multi ? 66 : 64}" text-anchor="middle" class="gv${multi ? ' gv2' : ''}" style="fill:var(--tl-${l}-t)">${esc(big)}<tspan class="gu" dx="2">${esc(unit)}</tspan></text>
+      <path d="${isNaN(v) ? '' : arc(0, fr(v), 40)}" stroke="var(--tl-${l})" stroke-width="11" fill="none"/>
+      <text x="60" y="64" text-anchor="middle" class="gv" style="fill:var(--tl-${l}-t)">${esc(big)}<tspan class="gu" dx="2">${esc(unit)}</tspan></text>`}
     </svg>
   </div>`;
+}
+// t°: процессор и модули Wi-Fi на одном циферблате — внешняя дуга и верхнее число CPU, внутренние дуги и числа ниже — Wi-Fi.
+// Норма CPU — зелёная, Wi-Fi — салатовая; от 85 °C — жёлтый, от 95 °C — красный у обоих.
+// o: { ip, rf, H } — на странице роутера (rf — период, H — история для максимумов)
+function tempGauge(j, c, o = {}) {
+  let w = wArcs(j).map(a => ({ ...a, n: 'Wi-Fi ' + a.n, ok: 'lime' }));
+  if (!w.length && c.wtemp) w = [{ n: 'Wi-Fi', v: c.wtemp, ok: 'lime' }];
+  const arcs = [{ n: 'CPU', v: c.temp }, ...w].filter(a => a.v > 0);
+  const now = arcs.map(a => `${a.n}: ${f1(a.v)} °C`).join(', ') + '.';
+  const mx = o.H ? `Максимум за ${o.rf}: CPU ${f1(Math.max(0, ...o.H.temp))} °C${o.H.wtemp.some(x => x > 0) ? `, Wi-Fi ${f1(Math.max(0, ...o.H.wtemp))} °C` : ''}.` : '';
+  return gauge({ ip: o.ip, key: 'temp', label: 't°', value: arcs.length ? Math.max(...arcs.map(a => a.v)) : NaN, max: 110, unit: '°C', th: TH.temp, arcs,
+    title: arcs.length > 1 ? 'Температура процессора (внешняя дуга, верхнее число) и Wi-Fi (внутренняя дуга, нижнее число).' : 'Температура процессора (датчика Wi-Fi нет).',
+    sub: now, sub2: mx,
+    legend: [['var(--tl-good)', 'CPU: норма'], ...(w.length ? [['var(--tl-lime)', 'Wi-Fi: норма']] : []), ['var(--tl-warn)', `от ${TH.temp[0]} °C — внимание`], ['var(--tl-bad)', `от ${TH.temp[1]} °C — перегрев`]],
+    go: { chart: 'c-temp' }, goText: o.ip ? 'график температуры роутера' : 'график температуры' });
+}
+// Net на вкладке «Обзор»: приём по интерфейсу маршрута по умолчанию, шкала — по пику за выбранный период
+function netGauge(j, rf) {
+  const w = j.net && j.net[j.wan];
+  if (!w) return gauge({ label: 'Net', value: NaN, neutral: true, text: 'n/a', title: 'Нет данных по интерфейсу маршрута по умолчанию.' });
+  const rx = last(w.rx), tx = last(w.tx), max = niceMax(Math.max(1, ...w.rx, ...w.tx) * 1.1);
+  return gauge({ label: 'Net', value: rx, max, neutral: true, text: mbit(rx), title: `Приём по интерфейсу маршрута по умолчанию (${j.wan}): интернет или аплинк mesh.`,
+    sub: `Передача: ${mbit(tx)}.`, sub2: `Шкала до ${mbit(max)} (по пику за ${rf}).`, go: { chart: 'c-net', iface: j.wan }, goText: 'график сети' });
 }
 // подсказки «?» у циферблатов: наведение — показать, щелчок — закрепить; открытая подсказка переживает автообновление
 let openGaugeKey = null;
@@ -1050,7 +1079,7 @@ class Overview {
     const memUsed = (H.t || []).map((_, i) => { const tot = H.anon[i] + H.kern[i] + H.cache[i] + H.shm[i] + H.free[i]; return tot ? (tot - H.avail[i]) / tot * 100 : 0; });
     const cpuH = (H.t || []).map((_, i) => H.user[i] + H.sys[i] + H.irq[i] + H.io[i]);
     const wan = j.net && j.net[j.wan], wrx = wan ? last(wan.rx) : null, wtx = wan ? last(wan.tx) : null;
-    const netMax = niceMax(Math.max(1, ...(wan ? wan.rx.concat(wan.tx) : [])) * 1.1), swT = (j.swapTotal || 0) / 1024;
+    const netMax = niceMax(Math.max(1, ...(wan ? wan.rx.concat(wan.tx) : [])) * 1.1), swT = (j.swapTotal || 0) / 1024, nc = j.ncpu || 1;
     const top = (j.top || []).filter(p => !p.gone);
     // два мини-топа по 5; щелчок по заголовку CPU или RSS перестраивает топ по этому столбцу
     const ms = this.mini[j.ip] || (this.mini[j.ip] = { a: 'cpu', b: 'rss' });
@@ -1075,11 +1104,9 @@ class Overview {
         (swT > 0 ? gauge({ ip: j.ip, key: 'swap', label: 'Swap', value: c.swap / swT * 100, max: 100, th: TH.swap, text: mb(c.swap), title: 'Сжатая память в ОЗУ (zram).',
           sub: `Занято ${mb(c.swap)} из ${mb(swT)} (${pct(c.swap / swT * 100)}).`, go: { sort: 'swap' }, goText: 'процессы роутера по объёму в swap' })
           : gauge({ ip: j.ip, key: 'swap', label: 'Swap', value: NaN, th: TH.swap, text: 'n/a', title: 'Swap на этом роутере не настроен.' })) +
-        gauge({ ip: j.ip, key: 'temp', label: 't° CPU', value: c.temp, max: 110, unit: '°C', th: TH.temp, title: 'Температура процессора.',
-          go: { chart: 'c-temp' }, goText: 'график температуры роутера' }) +
-        (c.wtemp ? gauge({ ip: j.ip, key: 'wtemp', label: 't° Wi-Fi', value: c.wtemp, max: 110, unit: '°C', th: TH.temp, title: wArcs(j).length > 1 ? 'Датчики температуры модулей Wi-Fi.' : 'Датчик температуры Wi-Fi.', sub: wTip(j), arcs: wArcs(j),
-          go: { chart: 'c-temp' }, goText: 'график температуры роутера' })
-          : gauge({ ip: j.ip, key: 'wtemp', label: 't° Wi-Fi', value: NaN, th: TH.temp, text: 'n/a', title: 'На этом роутере нет датчика температуры Wi-Fi.' })) +
+        gauge({ ip: j.ip, key: 'load', label: 'Load', value: c.load, max: nc * 2, th: [nc, nc * 1.5], fmt: v => (+v).toFixed(2).replace('.', ','), title: 'Load average за 1 min: сколько процессов в среднем работает или ждёт CPU и диск.',
+          sub: `${nc} = все ${nc} ядра заняты полностью.`, go: { sort: 'ld' }, goText: 'процессы роутера по вкладу в Load' }) +
+        tempGauge(j, c, { ip: j.ip }) +
         gauge({ ip: j.ip, key: 'net', label: 'Net', value: wrx, max: netMax, neutral: true, text: mbit(wrx), title: `Приём по интерфейсу маршрута по умолчанию (${j.wan || '—'}): интернет или аплинк mesh.`,
           sub: `Передача: ${mbit(wtx)}.`, sub2: `Шкала до ${mbit(netMax)} (по пику за последние минуты).` })
       }</div>
@@ -1248,11 +1275,8 @@ class HostView {
       gauge({ label: 'Load', value: c.load, max: nc * 2, th: [nc, nc * 1.5], fmt: v => (+v).toFixed(2).replace('.', ','), title: 'Load average за 1 min: сколько процессов в среднем работает или ждёт CPU и диск.',
         sub: `${nc} = все ${nc} ядра заняты полностью.`, sub2: `Среднее за ${rf}: ${f1(avgArr(H.load))}.`,
         go: { sort: 'ld' }, goText: 'процессы по вкладу в Load' }) +
-      gauge({ label: 't° CPU', value: c.temp, max: 110, unit: '°C', th: TH.temp, title: 'Датчик температуры процессора.', sub: `Максимум за ${rf}: ${f1(Math.max(0, ...H.temp))} °C.`,
-        go: { chart: 'c-temp' }, goText: 'график температуры' }) +
-      (c.wtemp ? gauge({ label: 't° Wi-Fi', value: c.wtemp, max: 110, unit: '°C', th: TH.temp, title: wArcs(j).length > 1 ? 'Датчики температуры модулей Wi-Fi.' : 'Датчик температуры Wi-Fi.', sub: wTip(j), sub2: `Максимум за ${rf}: ${f1(Math.max(0, ...H.wtemp))} °C.`, arcs: wArcs(j),
-        go: { chart: 'c-temp' }, goText: 'график температуры' })
-        : gauge({ label: 't° Wi-Fi', value: NaN, th: TH.temp, text: 'n/a', title: 'На этом роутере нет датчика температуры Wi-Fi.' }));
+      tempGauge(j, c, { rf, H }) +
+      netGauge(j, rf);
     this.bindGauges();
     const v = k => H[k];
     this.ch.cpu.set(H.t, [{ name: 'Процессы (user)', color: 'var(--s1)', v: v('user') }, { name: 'Ядро (system)', color: 'var(--s2)', v: v('sys') }, { name: 'Прерывания (irq/softirq)', color: 'var(--s3)', v: v('irq') }, { name: 'Ожидание диска (iowait)', color: 'var(--s4)', v: v('io') }]);
@@ -1281,6 +1305,7 @@ class HostView {
   // куда ведёт щелчок по циферблату: { chart: id } — к графику, иначе — к таблице процессов с сортировкой
   goTo(go) {
     if (!go.chart) return this.goProcs(go);
+    if (go.iface && (this.j.net || {})[go.iface]) { this.iface = go.iface; this.renderIfs(); this.renderNet(); }
     openGaugeKey = null; this.m.querySelectorAll('.gauge.open').forEach(x => x.classList.remove('open'));
     scrollToPanel($('#' + go.chart, this.m).closest('.panel'));
   }

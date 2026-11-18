@@ -31,7 +31,7 @@ if [ "$1" = remove ]; then
   rm -f /etc/init.d/rmon
   uci -q delete uhttpd.rmon; uci commit uhttpd; /etc/init.d/uhttpd restart
   rm -rf "$DST" /tmp/rmon /tmp/rmon-web
-  sed -i -e '\#^/etc/rmon-web/$#d' -e '\#^/etc/init.d/rmon$#d' /etc/sysupgrade.conf
+  sed -i -e '\#^/etc/rmon-web/$#d' -e '\#^/etc/init.d/rmon$#d' -e '\#^/etc/rc.d/S99rmon$#d' /etc/sysupgrade.conf
   echo REMOVED; exit 0
 fi
 [ "$1" = install ] || err "использование: setup.sh install <порт> [ключ|-] [IP...] | setup.sh remove"
@@ -76,6 +76,8 @@ fi
 cp "$DST/lib/rmon.init" /etc/init.d/rmon && chmod 755 /etc/init.d/rmon
 grep -qx '/etc/rmon-web/' /etc/sysupgrade.conf || echo '/etc/rmon-web/' >>/etc/sysupgrade.conf
 grep -qx '/etc/init.d/rmon' /etc/sysupgrade.conf || echo '/etc/init.d/rmon' >>/etc/sysupgrade.conf
+# ссылка автозапуска: без неё после обновления прошивки служба останется выключенной
+grep -qx '/etc/rc.d/S99rmon' /etc/sysupgrade.conf || echo '/etc/rc.d/S99rmon' >>/etc/sysupgrade.conf
 /etc/init.d/rmon enable
 # топ адресов: учёт байт в conntrack и журнал DNS — там, где роутер сам выпускает устройства в интернет
 if [ "$(grep -c . /proc/net/nf_conntrack 2>/dev/null)" -gt 20 ] 2>/dev/null; then
