@@ -270,7 +270,11 @@ tr.click { cursor: pointer; }
 #nettop tr.grp-first td { border-top: 2px solid var(--grid); }
 /* значения — по центру под заголовками; CPU — блок «полоска + число» фиксированной ширины, тоже по центру,
    поэтому полоски всех строк начинаются в одной точке */
-#nettop td.n { text-align: center; }
+#nettop td { text-align: center; }
+#nettop td.pn, #nettop .rt-cell, #nettop .st-tab th, #nettop .st-tab td { text-align: left; }
+#nettop .rt-sort { font-size: 11px; font-weight: 400; color: var(--muted); margin-top: 2px; }
+#nettop tr.flash td { animation: rowflash 1.6s ease-out; }
+@keyframes rowflash { from { background: var(--sel); } to { background: transparent; } }
 /* «Интерфейсы» (вкладки «Трафик» и «Обзор»): связь, клиенты и скорости — по центру под заголовками */
 #t-tab td.n, #t-tab td.c, #ifs td.n { text-align: center; }
 /* «Клиенты»: сигнал, каналы, время и объёмы — по центру под заголовками */
@@ -806,6 +810,29 @@ function bindSort(table, sort, rerender) {
 const ldFmt = v => v >= 0.005 ? (+v).toFixed(2).replace('.', ',') : '—';
 const cpuCell = v => `<span class="volc"><span class="cpubar"><i style="width:${Math.min(100, v || 0)}%"></i></span><span>${pct(v)}</span></span>`;
 
+// ---------- таблица процессов: одни столбцы у «Процессов» роутера и у «Самых ресурсоёмких процессов в сети» ----------
+const PROC_COLS = [{ k: 'name', label: 'Процесс' }, { k: 'pid', label: 'PID', n: 1 }, { k: 'cpu', label: 'CPU 10 s', n: 1, title: 'за последние 10 секунд' }, { k: 'avg', label: 'CPU средн.', n: 1, title: 'среднее за последний час (или время жизни процесса)' }, { k: 'peak', label: 'CPU пик', n: 1, title: 'максимум за 10 s в течение часа', cls: 'hide-sm' },
+  { k: 'ld', label: 'Load', n: 1, title: 'вклад в Load: сколько ядер процесс занимал за последние 10 s (+1 в статусе D — ждёт диск)', cls: 'hide-sm' },
+  { k: 'rss', label: 'Память', n: 1, title: 'RSS — физическая память процесса' }, { k: 'drss', label: 'Δ за час', n: 1, title: 'изменение RSS за час', cls: 'hide-sm' }, { k: 'swap', label: 'Swap', n: 1, title: 'сколько памяти процесса вытеснено в swap (zram)', cls: 'hide-sm' }, { k: 'thr', label: 'Потоки', n: 1, cls: 'hide-sm' }, { k: 'state', label: 'Статус', cls: 'hide-sm', help: STATE_HELP }];
+const PROC_SORT_NAME = { cpu: 'CPU', avg: 'среднему CPU', peak: 'пику CPU', ld: 'вкладу в Load', rss: 'памяти', drss: 'росту памяти', swap: 'swap', thr: 'потокам', pid: 'PID', name: 'имени', state: 'статусу' };
+// производные поля: Δ RSS за час, объём в swap (sw — {pid: кБ}), вклад в Load — сколько ядер процесс занимал
+// за последние 10 s (+1, если он сейчас в непрерываемом ожидании D: такие тоже входят в Load, хотя CPU не тратят)
+function procPrep(rows, sw, nc) {
+  rows.forEach(p => { p.drss = p.rss - p.rss0; p.swap = p.gone ? 0 : ((sw || {})[p.pid] || 0); p.ld = p.gone ? 0 : (p.cpu || 0) * nc / 100 + (p.state === 'D' ? 1 : 0); });
+  return rows;
+}
+// светофор «Δ за час»: три самых больших роста — красные, остальной рост — оранжевый;
+// три самых больших снижения — зелёные, остальное снижение — жёлтое
+function dLight(list) {
+  const up = list.map(p => p.drss).filter(v => v > 0).sort((a, b) => b - a), dn = list.map(p => p.drss).filter(v => v < 0).sort((a, b) => a - b);
+  const u3 = up.length ? up[Math.min(2, up.length - 1)] : Infinity, d3 = dn.length ? dn[Math.min(2, dn.length - 1)] : -Infinity;
+  return v => v > 0 ? (v >= u3 ? 'd-r' : 'd-o') : v < 0 ? (v <= d3 ? 'd-g' : 'd-y') : '';
+}
+const procName = p => `<span class="pname">${esc(p.name)}</span>${p.k ? '<span class="tag">ядро</span>' : ''}${p.gone ? '<span class="tag">завершён</span>' : ''}<span class="pcmd mono" title="${esc(p.cmd)}">${esc(p.cmd)}</span>`;
+// ячейки после «Процесс»: PID … Статус
+const procTds = (p, dc) => `<td class="n">${p.pid}</td><td class="n">${cpuCell(p.cpu)}</td><td class="n">${pct(p.avg)}</td><td class="n hide-sm">${pct(p.peak)}</td><td class="n hide-sm">${ldFmt(p.ld)}</td><td class="n">${kb(p.rss)}</td>
+  <td class="n hide-sm ${dc(p.drss)}">${p.drss ? (p.drss > 0 ? '+' : '−') + kb(Math.abs(p.drss)) : '—'}</td><td class="n hide-sm">${p.swap ? kb(p.swap) : '—'}</td><td class="n hide-sm">${p.thr}</td><td class="hide-sm${STATE_BAD.has(p.state) ? ' st-bad' : ''}" title="${esc(STATE[p.state] || '')}">${esc(p.state)}</td>`;
+
 // ---------- маршрутизация и обновление ----------
 let view = null, timer = null, paused = false, gen = 0;
 function route() {
@@ -1025,7 +1052,7 @@ window.addEventListener('resize', () => { const b = document.getElementById('car
 // ================= Обзор сети =================
 class Overview {
   constructor(m) {
-    this.m = m; this.data = {}; this.sort = { k: 'cpu', asc: false };
+    this.m = m; this.data = {}; this.sort = { k: 'cpu', asc: false }; this.rsort = {}; this.thPin = { open: false };
     crumbs([]);
     setHelp('<div><b>Роутеры в сети</b></div><div>Поиск роутеров…</div>');
     m.innerHTML = `<div class="grid g-cards" id="cards"></div>
@@ -1039,7 +1066,7 @@ class Overview {
   }
   async refresh() {
     const list = await peers(); this.list = list;
-    setHelp(`<div><b>Роутеры в сети</b></div><div>${list.length} ${list.length === 1 ? 'роутер' : list.length < 5 ? 'роутера' : 'роутеров'} с RouterMon · данные каждые 10 s.</div><div>Нажмите на роутер или процесс, чтобы открыть подробности; на циферблат — процессы роутера с нужной сортировкой.</div>`);
+    setHelp(`<div><b>Роутеры в сети</b></div><div>${list.length} ${list.length === 1 ? 'роутер' : list.length < 5 ? 'роутера' : 'роутеров'} с RouterMon · данные каждые 10 s.</div><div>Нажмите на роутер или процесс, чтобы открыть подробности; на циферблат CPU, RAM, Swap или Load — процессы этого роутера в таблице «Самые ресурсоёмкие процессы в сети» с сортировкой по этому показателю.</div>`);
     const res = await Promise.all(list.map(ip => api(ip, 'a=sum').then(j => ({ ip, j })).catch(e => ({ ip, e }))));
     res.forEach(r => this.data[r.ip] = r);
     this.render();
@@ -1056,7 +1083,10 @@ class Overview {
       (this.mini[ip] || (this.mini[ip] = { a: 'cpu', b: 'rss' }))[slot] = key; this.render();
     });
     cards.querySelectorAll('.gauge[data-go]').forEach(g => {
-      const go = e => { if (e) e.stopPropagation(); pendingGo = { ip: g.dataset.ip, go: JSON.parse(g.dataset.go) }; location.hash = hostHref(g.dataset.ip); };
+      // показатель процесса (CPU, RAM, Swap, Load) — к таблице ниже; график (температура) — на страницу роутера
+      const go = e => { if (e) e.stopPropagation(); const d = JSON.parse(g.dataset.go);
+        if (d.sort) return this.goTop(g.dataset.ip, d.sort);
+        pendingGo = { ip: g.dataset.ip, go: d }; location.hash = hostHref(g.dataset.ip); };
       g.onclick = go; g.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(e); } };
     });
     // корзина: карточка сразу пропадает с главной; вернуть — из списка «+ Добавить роутер»
@@ -1097,15 +1127,15 @@ class Overview {
         <div class="badges">${health(j).map(h => badge(...h)).join('')}</div></div>
       <div class="gauges sm">${
         gauge({ ip: j.ip, key: 'cpu', label: 'CPU', value: c.cpu, max: 100, unit: '%', th: TH.cpu, title: 'Загрузка всех ядер за последние 10 s.',
-          sub: `${j.ncpu} ядра, load ${f1(c.load)}.`, sub2: `Процессы ${pct(c.user)}, ядро ${pct(c.sys)}, прерывания ${pct(c.irq)}.`, go: { sort: 'cpu' }, goText: 'процессы роутера по загрузке CPU' }) +
+          sub: `${j.ncpu} ядра, load ${f1(c.load)}.`, sub2: `Процессы ${pct(c.user)}, ядро ${pct(c.sys)}, прерывания ${pct(c.irq)}.`, go: { sort: 'cpu' }, goText: 'процессы этого роутера в таблице ниже, по CPU' }) +
         gauge({ ip: j.ip, key: 'mem', label: 'RAM', value: c.usedPct, max: 100, unit: '%', th: TH.mem, title: 'Занятая память: всего − доступно приложениям.',
-          sub: `Доступно ${mb(c.avail)} из ${mb(c.total)}.`, sub2: `Процессам ${mb(c.anon)}, ядру ${mb(c.kern)}.`, go: { sort: 'rss' }, goText: 'процессы роутера по занятой памяти' }) +
+          sub: `Доступно ${mb(c.avail)} из ${mb(c.total)}.`, sub2: `Процессам ${mb(c.anon)}, ядру ${mb(c.kern)}.`, go: { sort: 'rss' }, goText: 'процессы этого роутера в таблице ниже, по памяти' }) +
         // одинаковый набор циферблатов у всех роутеров: чего нет (swap, датчик), показывается серым «n/a»
         (swT > 0 ? gauge({ ip: j.ip, key: 'swap', label: 'Swap', value: c.swap / swT * 100, max: 100, th: TH.swap, text: mb(c.swap), title: 'Сжатая память в ОЗУ (zram).',
-          sub: `Занято ${mb(c.swap)} из ${mb(swT)} (${pct(c.swap / swT * 100)}).`, go: { sort: 'swap' }, goText: 'процессы роутера по объёму в swap' })
+          sub: `Занято ${mb(c.swap)} из ${mb(swT)} (${pct(c.swap / swT * 100)}).`, go: { sort: 'swap' }, goText: 'процессы этого роутера в таблице ниже, по swap' })
           : gauge({ ip: j.ip, key: 'swap', label: 'Swap', value: NaN, th: TH.swap, text: 'n/a', title: 'Swap на этом роутере не настроен.' })) +
         gauge({ ip: j.ip, key: 'load', label: 'Load', value: c.load, max: nc * 2, th: [nc, nc * 1.5], fmt: v => (+v).toFixed(2).replace('.', ','), title: 'Load average за 1 min: сколько процессов в среднем работает или ждёт CPU и диск.',
-          sub: `${nc} = все ${nc} ядра заняты полностью.`, go: { sort: 'ld' }, goText: 'процессы роутера по вкладу в Load' }) +
+          sub: `${nc} = все ${nc} ядра заняты полностью.`, go: { sort: 'ld' }, goText: 'процессы этого роутера в таблице ниже, по вкладу в Load' }) +
         tempGauge(j, c, { ip: j.ip }) +
         gauge({ ip: j.ip, key: 'net', label: 'Net', value: wrx, max: netMax, neutral: true, text: mbit(wrx), title: `Приём по интерфейсу маршрута по умолчанию (${j.wan || '—'}): интернет или аплинк mesh.`,
           sub: `Передача: ${mbit(wtx)}.`, sub2: `Шкала до ${mbit(netMax)} (по пику за последние минуты).` })
@@ -1123,24 +1153,41 @@ class Overview {
     </div>`;
   }
   renderTop() {
-    // с каждого роутера — 5 первых по выбранной сортировке (по умолчанию по CPU). Роутеры идут в том же порядке,
-    // что и карточки сверху; сортировка — только внутри строк одного роутера. Столбец «Роутер» — если роутеров больше одного
+    // столбцы — как у «Процессов» на странице роутера. С каждого роутера — 5 первых по сортировке; роутеры идут
+    // в том же порядке, что и карточки сверху, сортировка — только внутри строк одного роутера.
+    // Щелчок по заголовку — сортировка для всех роутеров; щелчок по циферблату карточки — своя сортировка
+    // только для этого роутера (this.rsort[ip]), она показывается под его именем. Столбец «Роутер» — если роутеров больше одного
     const PER = 5, many = this.list.length > 1;
     if (this.sort.k === 'router') this.sort = { k: 'cpu', asc: false };
-    const k = this.sort.k === 'name' ? 'cpu' : this.sort.k;
-    const nm = { cpu: 'CPU', rss: 'памяти', pid: 'PID', thr: 'потокам' }[k] || 'CPU';
-    $('#nettop-sub', this.m).textContent = `по ${PER} самых ресурсоёмких ${many ? 'с каждого роутера ' : ''}(по ${nm}); CPU за последние 10 s`;
-    const cols = [...(many ? [{ label: 'Роутер' }] : []), { k: 'name', label: 'Процесс' }, { k: 'pid', label: 'PID', n: 1, cls: 'hide-sm' }, { k: 'cpu', label: 'CPU', n: 1, title: '% всей мощности роутера за последние 10 s' }, { k: 'rss', label: 'Память (RSS)', n: 1 }, { k: 'thr', label: 'Потоки', n: 1, cls: 'hide-sm' }];
+    // по имени, PID и статусу «самых ресурсоёмких» не выбрать — пятёрка берётся по CPU, а показывается в выбранном порядке
+    const pick = s => ['name', 'pid', 'state'].includes(s.k) ? 'cpu' : s.k;
+    const own = this.list.some(ip => this.rsort[ip]);
+    $('#nettop-sub', this.m).textContent = `по ${PER} самых ресурсоёмких ${many ? 'с каждого роутера ' : ''}(по ${PROC_SORT_NAME[this.sort.k] || 'CPU'}${own ? '; у отмеченных роутеров — своя сортировка' : ''}); таблица — за последний час`;
+    const cols = [...(many ? [{ label: 'Роутер' }] : []), ...PROC_COLS];
     let body = '';
     for (const ip of this.list) {
       const r = this.data[ip]; if (!r || r.e) continue;
-      const ps = sortRows(sortRows((r.j.top || []).filter(p => !p.gone), k, false).slice(0, PER), this.sort.k, this.sort.asc);
-      body += ps.map((p, i) => `<tr class="click${many && !i ? ' grp-first' : ''}" data-h="${procHref(ip, p.pid, p.st)}">${many && !i ? `<td rowspan="${ps.length}" class="rt-cell"><a href="${hostHref(ip)}">${esc(r.j.name || ip)}</a></td>` : ''}<td><span class="pname">${esc(p.name)}</span><span class="pcmd mono">${esc(p.cmd)}</span></td><td class="n hide-sm">${p.pid}</td><td class="n">${cpuCell(p.cpu)}</td><td class="n">${kb(p.rss)}</td><td class="n hide-sm">${p.thr}</td></tr>`).join('');
+      const s = this.rsort[ip] || this.sort;
+      const all = procPrep((r.j.top || []).filter(p => !p.gone), r.j.swap, r.j.ncpu || 1), dc = dLight(all);
+      const ps = sortRows(sortRows(all, pick(s), false).slice(0, PER), s.k, s.asc);
+      const rt = `<a href="${hostHref(ip)}">${esc(r.j.name || ip)}</a>${this.rsort[ip] ? `<div class="rt-sort" title="своя сортировка этого роутера (щелчок по циферблату); щелчок по заголовку таблицы сбрасывает">по ${esc(PROC_SORT_NAME[s.k] || s.k)} ${s.asc ? '▴' : '▾'}</div>` : ''}`;
+      body += ps.map((p, i) => `<tr class="click${many && !i ? ' grp-first' : ''}" data-ip="${ip}" data-h="${procHref(ip, p.pid, p.st)}">${many && !i ? `<td rowspan="${ps.length}" class="rt-cell">${rt}</td>` : ''}<td class="pn">${procName(p)}</td>${procTds(p, dc)}</tr>`).join('');
     }
     const t = $('#nettop', this.m);
     t.innerHTML = thead(cols, this.sort) + body;
     t.querySelectorAll('tr[data-h]').forEach(tr => tr.onclick = e => { if (!e.target.closest('a')) location.hash = tr.dataset.h; });
-    bindSort(t, this.sort, () => this.renderTop());
+    bindSort(t, this.sort, () => { this.rsort = {}; this.renderTop(); });
+    bindThHelp(t, this.thPin);
+  }
+  // щелчок по циферблату карточки: таблица ниже раскрывается, у этого роутера — сортировка по показателю циферблата
+  goTop(ip, k) {
+    this.rsort[ip] = { k, asc: false };
+    openGaugeKey = null; this.m.querySelectorAll('.gauge.open').forEach(x => x.classList.remove('open'));
+    const fp = $('#nettop-p', this.m);
+    if (!fp.classList.contains('open')) { fp.classList.add('open'); $('#nettop-h', this.m).setAttribute('aria-expanded', true); lsSet('rmon.nettop', true); layoutCards($('#cards', this.m)); }
+    this.renderTop();
+    scrollToPanel(fp);
+    this.m.querySelectorAll(`#nettop tr[data-ip="${ip}"]`).forEach(tr => tr.classList.add('flash'));   // строки этого роутера
   }
 }
 
@@ -1348,28 +1395,13 @@ class HostView {
     // поиск: несколько вариантов через «|» — подходит любой
     const terms = (f.q || '').toLowerCase().split('|').map(s => s.trim()).filter(Boolean);
     if (terms.length) rows = rows.filter(p => terms.some(q => p.name.toLowerCase().includes(q) || (p.cmd || '').toLowerCase().includes(q) || String(p.pid) === q));
-    const sw = this.j.swap || {};
-    // вклад в Load: сколько ядер процесс занимал за последние 10 s (+1, если он сейчас в непрерываемом ожидании D —
-    // такие процессы тоже входят в Load, хотя CPU не тратят)
-    const nc = this.j.ncpu || 1;
-    rows.forEach(p => { p.drss = p.rss - p.rss0; p.swap = p.gone ? 0 : (sw[p.pid] || 0); p.ld = p.gone ? 0 : (p.cpu || 0) * nc / 100 + (p.state === 'D' ? 1 : 0); });
+    procPrep(rows, this.j.swap, this.j.ncpu || 1);
     const live = all.filter(p => !p.gone);
     $('#p-count', this.m).textContent = `${live.length} процессов, из них потоков ядра ${live.filter(p => p.k).length}; сумма RSS ${kb(live.reduce((a, p) => a + p.rss, 0))}`;
-    const cols = [{ k: 'name', label: 'Процесс' }, { k: 'pid', label: 'PID', n: 1 }, { k: 'cpu', label: 'CPU 10 s', n: 1, title: 'за последние 10 секунд' }, { k: 'avg', label: 'CPU средн.', n: 1, title: 'среднее за последний час (или время жизни процесса)' }, { k: 'peak', label: 'CPU пик', n: 1, title: 'максимум за 10 s в течение часа', cls: 'hide-sm' },
-      { k: 'ld', label: 'Load', n: 1, title: 'вклад в Load: сколько ядер процесс занимал за последние 10 s (+1 в статусе D — ждёт диск)', cls: 'hide-sm' },
-      { k: 'rss', label: 'Память', n: 1, title: 'RSS — физическая память процесса' }, { k: 'drss', label: 'Δ за час', n: 1, title: 'изменение RSS за час', cls: 'hide-sm' }, { k: 'swap', label: 'Swap', n: 1, title: 'сколько памяти процесса вытеснено в swap (zram)', cls: 'hide-sm' }, { k: 'thr', label: 'Потоки', n: 1, cls: 'hide-sm' }, { k: 'state', label: 'Статус', cls: 'hide-sm', help: STATE_HELP }];
+    const cols = PROC_COLS;
     const t = $('#ptab', this.m), ip = this.ip;
-    // светофор «Δ за час»: три самых больших роста — красные, остальной рост — оранжевый;
-    // три самых больших снижения — зелёные, остальное снижение — жёлтое
-    const dLight = list => {
-      const up = list.map(p => p.drss).filter(v => v > 0).sort((a, b) => b - a), dn = list.map(p => p.drss).filter(v => v < 0).sort((a, b) => a - b);
-      const u3 = up.length ? up[Math.min(2, up.length - 1)] : Infinity, d3 = dn.length ? dn[Math.min(2, dn.length - 1)] : -Infinity;
-      return v => v > 0 ? (v >= u3 ? 'd-r' : 'd-o') : v < 0 ? (v <= d3 ? 'd-g' : 'd-y') : '';
-    };
     const dc = dLight(rows);
-    const prow = (p, member) => `<tr class="click${member ? ' member' : ''}${p.gone ? ' gone' : ''}" data-h="${procHref(ip, p.pid, p.st)}"><td><span class="pname">${esc(p.name)}</span>${p.k ? '<span class="tag">ядро</span>' : ''}${p.gone ? '<span class="tag">завершён</span>' : ''}<span class="pcmd mono" title="${esc(p.cmd)}">${esc(p.cmd)}</span></td>
-      <td class="n">${p.pid}</td><td class="n">${cpuCell(p.cpu)}</td><td class="n">${pct(p.avg)}</td><td class="n hide-sm">${pct(p.peak)}</td><td class="n hide-sm">${ldFmt(p.ld)}</td><td class="n">${kb(p.rss)}</td>
-      <td class="n hide-sm ${dc(p.drss)}">${p.drss ? (p.drss > 0 ? '+' : '−') + kb(Math.abs(p.drss)) : '—'}</td><td class="n hide-sm">${p.swap ? kb(p.swap) : '—'}</td><td class="n hide-sm">${p.thr}</td><td class="hide-sm${STATE_BAD.has(p.state) ? ' st-bad' : ''}" title="${esc(STATE[p.state] || '')}">${esc(p.state)}</td></tr>`;
+    const prow = (p, member) => `<tr class="click${member ? ' member' : ''}${p.gone ? ' gone' : ''}" data-h="${procHref(ip, p.pid, p.st)}"><td>${procName(p)}</td>${procTds(p, dc)}</tr>`;
     let body = '';
     if (f.group) {
       const g = new Map(); for (const p of rows) { if (!g.has(p.name)) g.set(p.name, []); g.get(p.name).push(p); }

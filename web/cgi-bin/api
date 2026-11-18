@@ -206,6 +206,20 @@ procs() {
   }' "$D/cmd.tsv" "$D/pk.tsv" "$O1" "$P1" "$L1"
 }
 
+# таблица процессов за час: меняется только с новым снимком (раз в 10 с) — считается один раз на снимок и общая
+# для главной (a=sum) и страницы роутера (a=host)
+procs_cached() {
+  lf=$(lastfiles 1); pc="$C/procs.${lf##*/}"
+  if [ ! -s "$pc" ]; then rm -f "$C"/procs.*; procs 0 $(lastfiles 360) >"$pc.tmp" && mv "$pc.tmp" "$pc"; fi
+  cat "$pc" 2>/dev/null || printf '[]'
+}
+# сколько памяти каждого процесса сейчас в swap (VmSwap), только ненулевые: {"pid":кБ}
+swapmap() {
+  printf '{'
+  cat /proc/[0-9]*/status 2>/dev/null | awk '/^Pid:/ { p = $2 } /^VmSwap:/ && $2 > 0 { printf "%s\"%s\":%d", (n++ ? "," : ""), p, $2 }'
+  printf '}'
+}
+
 info() {
   nm=$(cat /proc/sys/kernel/hostname); md=$(cat /tmp/sysinfo/model 2>/dev/null)
   fw=$(. /etc/openwrt_release 2>/dev/null; echo "$DISTRIB_DESCRIPTION")
@@ -371,7 +385,7 @@ sum)
   if [ ! -s "$sc" ]; then rm -f "$C"/sum.*
     { printf ',"hist":'; series "$D/sys.tsv" 6
       printf ',"net":'; [ -s "$D/net.tsv" ] && tail -n 200 "$D/net.tsv" | netseries /dev/stdin 1 || printf '{}'
-      printf ',"top":'; procs 8 $(lastfiles 360); } >"$sc.tmp" && mv "$sc.tmp" "$sc"
+      printf ',"top":'; procs_cached; printf ',"swap":'; swapmap; } >"$sc.tmp" && mv "$sc.tmp" "$sc"
   fi
   hdr; printf '{"ok":true,'; info
   cat "$sc" 2>/dev/null
@@ -453,15 +467,8 @@ esac
   if [ ! -s "$sc" ]; then rm -f "$sk".*; tail -n $sn "$SF" 2>/dev/null | series /dev/stdin $g >"$sc.tmp" && mv "$sc.tmp" "$sc"; fi
   printf ',"range":%d,"hist":' "$m"; cat "$sc" 2>/dev/null || printf 'null'
   printf ',"net":'; netwin
-  # таблица процессов меняется только с новым снимком (раз в 10 с) — считаем один раз на снимок
-  # (переключение периода и несколько открытых вкладок не пересчитывают её заново)
-  lf=$(lastfiles 1); pc="$C/procs.${lf##*/}"
-  if [ ! -s "$pc" ]; then rm -f "$C"/procs.*; procs 0 $(lastfiles 360) >"$pc.tmp" && mv "$pc.tmp" "$pc"; fi
-  printf ',"procs":'; cat "$pc" 2>/dev/null || printf '[]'
-  # сколько памяти каждого процесса сейчас в swap (VmSwap), только ненулевые: {"pid":кБ}
-  printf ',"swap":{'
-  cat /proc/[0-9]*/status 2>/dev/null | awk '/^Pid:/ { p = $2 } /^VmSwap:/ && $2 > 0 { printf "%s\"%s\":%d", (n++ ? "," : ""), p, $2 }'
-  printf '}'
+  printf ',"procs":'; procs_cached
+  printf ',"swap":'; swapmap
   printf '}\n'
   ;;
 
